@@ -3,6 +3,7 @@ import { getCollector as getCollectorConfig } from "../../lib/collectorStore.js"
 import { healCollector } from "../../heal-orchestrator/healCollector.js";
 import { approveCollector } from "../../heal-orchestrator/approveCollector.js";
 import { runCollectorForCompetitor } from "./pipeline.js";
+import { log, debugLog, logError } from "../../lib/logger.js";
 
 function getMostRecentHeal(competitor) {
   return db.prepare("SELECT * FROM heals WHERE competitor = ? ORDER BY triggered_at DESC LIMIT 1").get(competitor);
@@ -23,11 +24,13 @@ export function insertPendingHeal(competitor, diagnosis) {
        VALUES (?, ?, ?, ?, NULL, NULL, 'healing')`
     )
     .run(config.collector_id, competitor, new Date().toISOString(), diagnosis);
+  log("heal", `[${competitor}] heal #${healId} queued`, { diagnosis });
   return healId;
 }
 
 export async function runHealJob(healId, competitor, diagnosis) {
   const config = getCollectorConfig(competitor);
+  debugLog("heal", `[${competitor}] heal #${healId} calling bdata scraper heal...`);
   try {
     const response = await healCollector(config.collector_id, config.url, diagnosis);
     db.prepare("UPDATE heals SET status = ?, preview_result = ? WHERE id = ?").run(
@@ -35,8 +38,10 @@ export async function runHealJob(healId, competitor, diagnosis) {
       JSON.stringify(response.preview_result ?? null),
       healId
     );
+    log("heal", `[${competitor}] heal #${healId} -> ${response.status}`);
   } catch (err) {
     db.prepare("UPDATE heals SET status = 'needs_review', error = ? WHERE id = ?").run(String(err.message ?? err), healId);
+    logError("heal", `[${competitor}] heal #${healId} failed, marked needs_review`, err);
   }
 }
 
@@ -59,24 +64,29 @@ export function markHealPending(competitor, { reject = false } = {}) {
     throw new Error(`No heal awaiting approval for ${competitor} (current: ${heal?.status ?? "none"})`);
   }
   db.prepare("UPDATE heals SET status = ? WHERE id = ?").run(reject ? "rejecting" : "approving", heal.id);
+  log("approve", `[${competitor}] heal #${heal.id} marked ${reject ? "rejecting" : "approving"}`);
   return heal;
 }
 
 export async function runApproveJob(healId, competitor, { reject = false } = {}) {
   const config = getCollectorConfig(competitor);
+  debugLog("approve", `[${competitor}] heal #${healId} calling bdata scraper approve (reject=${reject})...`);
   try {
     const response = await approveCollector(config.collector_id, config.url, { reject });
 
     if (reject) {
       db.prepare("UPDATE heals SET status = 'rejected', approved_at = ? WHERE id = ?").run(new Date().toISOString(), healId);
+      log("approve", `[${competitor}] heal #${healId} rejected`);
       return;
     }
 
     db.prepare("UPDATE heals SET status = ?, approved_at = ? WHERE id = ?").run(response.status, new Date().toISOString(), healId);
+    log("approve", `[${competitor}] heal #${healId} approved -> ${response.status}; verifying recovery with a fresh run`);
     // Verify recovery: re-run the collector and let evaluate_run confirm it's healthy again.
     await runCollectorForCompetitor(competitor);
   } catch (err) {
     db.prepare("UPDATE heals SET status = 'needs_review', error = ? WHERE id = ?").run(String(err.message ?? err), healId);
+    logError("approve", `[${competitor}] heal #${healId} approve failed, marked needs_review`, err);
   }
 }
 

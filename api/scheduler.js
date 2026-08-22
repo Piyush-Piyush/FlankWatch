@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { loadSchedules, loadCollectorsByCategory } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "./services/pipeline.js";
+import { log, debugLog, logError } from "../lib/logger.js";
 
 const active = new Map(); // category -> scheduled cron task
 
@@ -12,18 +13,20 @@ const active = new Map(); // category -> scheduled cron task
  */
 export function reloadSchedules({ aiEnabled = false, aiApiKey = null } = {}) {
   const schedules = loadSchedules();
+  debugLog("scheduler", "reloading schedules", schedules);
 
   // Drop tasks whose category no longer has a schedule.
   for (const [category, entry] of active) {
     if (!schedules[category]) {
       entry.task.stop();
       active.delete(category);
+      log("scheduler", `unscheduled category "${category}"`);
     }
   }
 
   for (const [category, expression] of Object.entries(schedules)) {
     if (!cron.validate(expression)) {
-      console.error(`Skipping invalid cron for "${category}": ${expression}`);
+      logError("scheduler", `skipping invalid cron for "${category}"`, new Error(expression));
       continue;
     }
     const existing = active.get(category);
@@ -35,16 +38,17 @@ export function reloadSchedules({ aiEnabled = false, aiApiKey = null } = {}) {
     const task = cron.schedule(expression, async () => {
       const groups = loadCollectorsByCategory();
       const collectors = groups[category] || [];
+      log("scheduler", `firing for category "${category}"`, { competitorCount: collectors.length });
       for (const c of collectors) {
         try {
           await runCollectorForCompetitor(c.name, { aiEnabled, aiApiKey });
         } catch (err) {
-          console.error(`Scheduled run failed for ${c.name}:`, err.message);
+          logError("scheduler", `scheduled run failed for ${c.name}`, err);
         }
       }
     });
 
     active.set(category, { task, expression });
-    console.log(`Scheduled category "${category}" @ ${expression}`);
+    log("scheduler", `scheduled category "${category}" @ ${expression}`);
   }
 }

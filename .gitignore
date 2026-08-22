@@ -5,5 +5,9 @@ api/db/*.db-journal
 api/db/*.db-wal
 api/db/*.db-shm
 scratch/
+
+# Per-category cron schedules — user runtime state, like the DB, not
+# something to version-control. Created/written at runtime.
+collectors/schedules.json
 dashboard/staged/
 flankwatch-build-roadmap.md

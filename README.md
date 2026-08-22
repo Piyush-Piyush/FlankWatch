@@ -2,20 +2,28 @@
 
 A competitor pricing monitor that **survives the website changing.** It scrapes competitor pricing pages via Bright Data Scraper Studio, detects when the extracted data looks wrong, diagnoses what likely broke, triggers Bright Data's AI self-healing, and shows a human the proposed fix before anything is approved — the whole `detect → diagnose → heal → preview → approve → verify` loop, visible on a live dashboard.
 
+Competitors are organized into **groups/segments** (API tools, video editing, smartphones, …), each with its own schedule. New competitors are added **on demand from the dashboard** — type a name + pricing URL + group, and Bright Data's AI builds the scraper in the background; nothing is hardcoded to a specific site.
+
 Built for a hackathon judged on Best Use of Bright Data, Best UI, and Best Clean Code.
+
+## Adding competitors & groups (on-demand, no code change)
+
+Click **+ Add competitor**, give it a name, pricing-page URL, and a group name (e.g. "Video editing"). That fires `bdata scraper create` in the background — the new competitor appears in its group as **Building…** while Bright Data's AI generates the scraper (a few minutes), then flips to a live card once it's built and verified. Each group has a **schedule** dropdown (hourly / daily / weekly) that runs every collector in that segment on a cron via `node-cron`. The registry lives in `collectors/collectors.json`; the store module (`lib/collectorStore.js`) is the only writer.
 
 ## Architecture
 
 ```
-/collectors        Scraper Studio CLI invocations ONLY — no orchestration, no storage.
+/collectors        Scraper Studio CLI invocations ONLY (create/run) — no orchestration,
+                     no storage. Plus collectors.json (the registry) + schedules.json.
 /heal-orchestrator  heal_collector() / approve_collector() — CLI invocations ONLY.
 /monitor            evaluate_run() — rule-based sanity checks + optional AI advisory pass.
-/lib                Shared logic used by the API layer: safe CLI spawning, pricing diff,
-                     weekly digest generation.
+/lib                Shared logic: safe CLI spawning, the collector store (only writer of
+                     collectors.json / schedules.json), pricing diff, weekly digest.
 /api
-  /db               SQLite schema + queries (runs, heals tables).
-  /services         Orchestration: trigger a collector run, store the result, evaluate it;
-                     trigger/approve a heal, verify recovery afterward.
+  /db               SQLite schema + queries (runs, heals, pending_collectors tables).
+  /services         Orchestration: run a collector + store + evaluate; heal/approve +
+                     verify; build a new collector on demand and persist it.
+  scheduler.js      node-cron per category — runs a whole group on a cadence.
   server.js         Express app — REST API + serves /dashboard statically.
 /dashboard          Vanilla HTML/CSS/JS. No framework — full control over the visual design,
                      zero build step.

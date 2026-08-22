@@ -13,11 +13,41 @@
         <span class="brand-mark">FlankWatch</span>
         <span class="brand-sub">Self-healing competitor pricing monitor</span>
       </div>
-      <div class="topbar-meta" id="topbar-meta"></div>
+      <div class="topbar-right">
+        <span class="topbar-meta" id="topbar-meta"></span>
+        <button class="btn btn-primary" id="add-toggle">+ Add competitor</button>
+      </div>
     </div>
   </header>
 
   <main class="main">
+    <section class="add-form-wrap" id="add-form-wrap" hidden>
+      <form class="add-form" id="add-form">
+        <div class="add-form-row">
+          <label class="field">
+            <span class="field-label">Competitor name</span>
+            <input type="text" name="name" placeholder="e.g. Adobe Premiere" required />
+          </label>
+          <label class="field">
+            <span class="field-label">Pricing page URL</span>
+            <input type="url" name="url" placeholder="https://…/pricing" required />
+          </label>
+          <label class="field">
+            <span class="field-label">Group / segment</span>
+            <input type="text" name="category" list="category-options" placeholder="e.g. Video editing" required />
+            <datalist id="category-options"></datalist>
+          </label>
+        </div>
+        <div class="add-form-footer">
+          <p class="add-form-note">Bright Data's AI builds the scraper from this — takes a few minutes. It'll appear in its group as “Building…”.</p>
+          <div class="add-form-actions">
+            <button type="button" class="btn btn-ghost" id="add-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="add-submit">Build scraper</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
     <section class="stat-row" id="stat-row"></section>
 
     <section class="digest-section" id="digest-section" hidden>
@@ -25,7 +55,7 @@
       <div class="digest-panel" id="digest-panel"></div>
     </section>
 
-    <section class="competitor-grid" id="competitor-grid" aria-live="polite">
+    <section class="groups" id="groups" aria-live="polite">
       <p class="loading-note">Loading competitors…</p>
     </section>
 

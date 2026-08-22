@@ -20,3 +20,20 @@ CREATE TABLE IF NOT EXISTS heals (
   status TEXT NOT NULL,
   error TEXT
 );
+
+-- Tracks on-demand collector builds while they run (AI generation takes
+-- several minutes) and after they fail, so the dashboard can show real
+-- pending/failed state instead of the request just hanging or vanishing.
+-- On success the collector graduates into collectors.json and its row here
+-- is marked done; failures keep the error for the user to see.
+CREATE TABLE IF NOT EXISTS pending_collectors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  category TEXT NOT NULL,
+  description TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  collector_id TEXT,
+  error TEXT
+);

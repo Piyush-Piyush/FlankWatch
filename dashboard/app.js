@@ -1,13 +1,29 @@
 const POLL_INTERVAL_MS = 4000;
 
-const grid = document.getElementById("competitor-grid");
+const groupsEl = document.getElementById("groups");
 const healLogPanel = document.getElementById("heal-log-panel");
 const topbarMeta = document.getElementById("topbar-meta");
 const digestSection = document.getElementById("digest-section");
 const digestPanel = document.getElementById("digest-panel");
 const statRow = document.getElementById("stat-row");
+const categoryOptions = document.getElementById("category-options");
+
+const addToggle = document.getElementById("add-toggle");
+const addFormWrap = document.getElementById("add-form-wrap");
+const addForm = document.getElementById("add-form");
+const addCancel = document.getElementById("add-cancel");
+const addSubmit = document.getElementById("add-submit");
 
 const inFlight = new Set(); // competitor names currently mid-action, to disable their buttons
+
+// Human-friendly cadence presets mapped to cron expressions. A whole
+// segment (category) shares one schedule.
+const SCHEDULE_PRESETS = [
+  { label: "Not scheduled", cron: "" },
+  { label: "Hourly", cron: "0 * * * *" },
+  { label: "Daily · 9am", cron: "0 9 * * *" },
+  { label: "Weekly · Mon 9am", cron: "0 9 * * 1" },
+];
 
 function formatMoney(price) {
   if (!price || typeof price.value !== "number") return "—";
@@ -189,6 +205,72 @@ function competitorCard(competitor) {
     </article>`;
 }
 
+function pendingCard(p) {
+  if (p.status === "failed") {
+    return `
+      <article class="card card--review" data-name="${escapeHtml(p.name)}">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-title">${escapeHtml(p.name)}</span>
+            <span class="card-url">${escapeHtml(p.url)}</span>
+          </div>
+          <span class="pill pill-review"><span class="pill-dot"></span>Build failed</span>
+        </div>
+        <div class="heal-banner state-needs_review">
+          <div class="heal-banner-title">Scraper build failed</div>
+          <div class="heal-banner-diagnosis">${escapeHtml(p.error || "unknown error")}</div>
+          <div class="heal-banner-actions">
+            <button class="btn btn-ghost" data-action="dismiss-pending" data-id="${p.id}">Dismiss</button>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  return `
+    <article class="card card--healing" data-name="${escapeHtml(p.name)}">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="card-title">${escapeHtml(p.name)}</span>
+          <span class="card-url">${escapeHtml(p.url)}</span>
+        </div>
+        <span class="pill pill-healing"><span class="pill-dot"></span>Building…</span>
+      </div>
+      <div class="building-note">
+        <span class="spinner" aria-hidden="true"></span>
+        Bright Data's AI is building this scraper — usually a few minutes.
+      </div>
+    </article>`;
+}
+
+function scheduleControl(category, schedules) {
+  const current = schedules[category] || "";
+  const options = SCHEDULE_PRESETS.map((p) => {
+    // Mark a matching preset selected; a custom/unknown cron shows as its raw value.
+    const selected = p.cron === current ? "selected" : "";
+    return `<option value="${escapeHtml(p.cron)}" ${selected}>${escapeHtml(p.label)}</option>`;
+  }).join("");
+  const isKnown = SCHEDULE_PRESETS.some((p) => p.cron === current);
+  const customOption = !isKnown && current ? `<option value="${escapeHtml(current)}" selected>Custom: ${escapeHtml(current)}</option>` : "";
+
+  return `
+    <label class="schedule-control">
+      <span class="schedule-label">Schedule group:</span>
+      <select data-schedule-category="${escapeHtml(category)}">${options}${customOption}</select>
+    </label>`;
+}
+
+function groupSection(category, competitors, pending, schedules) {
+  const cards = [...competitors.map(competitorCard), ...pending.map(pendingCard)].join("");
+  return `
+    <section class="group">
+      <div class="group-header">
+        <h2 class="group-title">${escapeHtml(category)}</h2>
+        ${scheduleControl(category, schedules)}
+      </div>
+      <div class="competitor-grid">${cards}</div>
+    </section>`;
+}
+
 function digestEntry(entry) {
   return `
     <div class="digest-entry">
@@ -216,9 +298,20 @@ async function fetchJson(url, options) {
   return body;
 }
 
+function groupByCategory(competitors, pending) {
+  const groups = new Map(); // category -> { competitors: [], pending: [] }
+  const ensure = (category) => {
+    if (!groups.has(category)) groups.set(category, { competitors: [], pending: [] });
+    return groups.get(category);
+  };
+  for (const c of competitors) ensure(c.category || "Uncategorized").competitors.push(c);
+  for (const p of pending) ensure(p.category || "Uncategorized").pending.push(p);
+  return groups;
+}
+
 async function refresh() {
   try {
-    const [{ competitors, aiEnabled }, { heals }, { digest }] = await Promise.all([
+    const [{ competitors, pending, schedules, aiEnabled }, { heals }, { digest }] = await Promise.all([
       fetchJson("/api/competitors"),
       fetchJson("/api/heals"),
       fetchJson("/api/digest"),
@@ -233,7 +326,19 @@ async function refresh() {
 
     statRow.innerHTML = statTiles(competitors);
 
-    grid.innerHTML = competitors.length ? competitors.map(competitorCard).join("") : `<p class="empty-note">No competitors configured yet.</p>`;
+    const groups = groupByCategory(competitors, pending);
+    if (groups.size === 0) {
+      groupsEl.innerHTML = `<p class="empty-note">No competitors yet. Click “Add competitor” to build your first scraper.</p>`;
+    } else {
+      groupsEl.innerHTML = [...groups.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([category, { competitors: gc, pending: gp }]) => groupSection(category, gc, gp, schedules))
+        .join("");
+    }
+
+    // Feed existing categories into the add-form's datalist for quick reuse.
+    const categories = [...new Set(competitors.map((c) => c.category).filter(Boolean))].sort();
+    categoryOptions.innerHTML = categories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join("");
 
     if (digest.length > 0) {
       digestSection.hidden = false;
@@ -250,10 +355,16 @@ async function refresh() {
   }
 }
 
-grid.addEventListener("click", async (e) => {
+groupsEl.addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
-  const { action, name } = btn.dataset;
+  const { action, name, id } = btn.dataset;
+
+  if (action === "dismiss-pending") {
+    await fetchJson(`/api/collectors/pending/${id}`, { method: "DELETE" }).catch((err) => console.error("dismiss failed:", err));
+    refresh();
+    return;
+  }
 
   inFlight.add(name);
   refresh();
@@ -278,6 +389,59 @@ grid.addEventListener("click", async (e) => {
   } finally {
     inFlight.delete(name);
     refresh();
+  }
+});
+
+groupsEl.addEventListener("change", async (e) => {
+  const select = e.target.closest("select[data-schedule-category]");
+  if (!select) return;
+  const category = select.dataset.scheduleCategory;
+  const cron = select.value || null;
+  try {
+    await fetchJson(`/api/schedules/${encodeURIComponent(category)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cron }),
+    });
+  } catch (err) {
+    console.error("schedule update failed:", err);
+    alert(`Couldn't update schedule: ${err.message}`);
+  }
+  refresh();
+});
+
+// ---- add-competitor form ----
+
+function toggleAddForm(show) {
+  addFormWrap.hidden = !show;
+  if (show) addForm.querySelector('input[name="name"]').focus();
+}
+
+addToggle.addEventListener("click", () => toggleAddForm(addFormWrap.hidden));
+addCancel.addEventListener("click", () => {
+  addForm.reset();
+  toggleAddForm(false);
+});
+
+addForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(addForm));
+  addSubmit.disabled = true;
+  addSubmit.textContent = "Starting…";
+  try {
+    await fetchJson("/api/collectors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: data.name, url: data.url, category: data.category }),
+    });
+    addForm.reset();
+    toggleAddForm(false);
+    refresh();
+  } catch (err) {
+    alert(`Couldn't start build: ${err.message}`);
+  } finally {
+    addSubmit.disabled = false;
+    addSubmit.textContent = "Build scraper";
   }
 });
 

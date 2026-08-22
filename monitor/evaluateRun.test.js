@@ -25,6 +25,21 @@ test("first-ever run with no last-known-good still passes if data looks sane", (
   assert.equal(status, "healthy");
 });
 
+test("accepts a monthly/annual price split (different site, same schema)", () => {
+  // A page that lists both cadences — the AI names them price_monthly /
+  // price_annual instead of a single price. The any-of paths should accept it.
+  const splitPrice = [
+    {
+      pricing_tiers: [
+        { plan_name: "Creator", price_monthly: { value: 35 }, price_annual: { value: 24 }, features: ["a", "b"] },
+        { plan_name: "Business", price_monthly: { value: 50 }, price_annual: { value: 40 }, features: ["a", "b"] },
+      ],
+    },
+  ];
+  const { status, reasons } = runRuleChecks(splitPrice, null, PRICING_SCHEMA);
+  assert.equal(status, "healthy", reasons.join("; "));
+});
+
 test("empty tiers with no last-known-good is flagged", () => {
   const broken = [{ pricing_tiers: [] }];
   const { status, reasons } = runRuleChecks(broken, null, PRICING_SCHEMA);

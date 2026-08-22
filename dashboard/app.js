@@ -25,10 +25,23 @@ const SCHEDULE_PRESETS = [
   { label: "Weekly · Mon 9am", cron: "0 9 * * 1" },
 ];
 
-function formatMoney(price) {
-  if (!price || typeof price.value !== "number") return "—";
-  const symbol = price.symbol || "$";
-  return `${symbol}${price.value}`;
+function money(obj) {
+  if (obj && typeof obj.value === "number") return `${obj.symbol || "$"}${obj.value}`;
+  if (typeof obj === "number") return `$${obj}`;
+  return null;
+}
+
+// Mirrors the monitor's any-of price handling: different sites structure
+// price as a single value or a monthly/annual split. Show whatever's there
+// (monthly preferred), with a "/yr" hint when only annual exists.
+function formatMoney(tier) {
+  const single = money(tier.price);
+  if (single) return single;
+  const monthly = money(tier.price_monthly);
+  if (monthly) return `${monthly}/mo`;
+  const annual = money(tier.price_annual);
+  if (annual) return `${annual}/yr`;
+  return "—";
 }
 
 function formatDuration(seconds) {
@@ -91,7 +104,7 @@ function pricingTable(latestRun) {
       (t) => `
       <tr>
         <td class="plan-name">${escapeHtml(t.plan_name ?? "—")}</td>
-        <td class="plan-price">${formatMoney(t.price)}</td>
+        <td class="plan-price">${formatMoney(t)}</td>
         <td class="plan-period">${escapeHtml(t.billing_period ?? "—")}</td>
       </tr>`
     )

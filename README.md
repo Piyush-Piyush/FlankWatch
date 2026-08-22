@@ -98,11 +98,17 @@ Requires two repo secrets:
 
 A few things worth knowing if picking this back up:
 
-- **1 verified collector (Postman), not 2-3.** Linear, Retool, and Resend were all attempted —
-  see `TARGETS.md` for exactly what happened. 3 of 4 non-Postman attempts failed during AI
-  generation itself, across unrelated sites, in the same session that had already run ~7 prior
-  generations — reads more like transient account/session load than per-site difficulty. Worth
-  retrying fresh rather than assuming those targets are permanently unworkable.
+- **Two live collectors in two groups (Postman + Descript).** Descript was built through the
+  on-demand "+ Add competitor" flow, live — proof the create path works end to end and isn't
+  hardcoded to Postman. Descript also surfaced a genuinely useful case: its page lists monthly
+  *and* annual prices, so Bright Data's AI produced `price_monthly` / `price_annual` instead of
+  Postman's single `price`. Rather than special-case it, the monitor's price check now accepts
+  any of those shapes (see `monitor/schemaConfig.js` — a field can list several candidate
+  `paths`), which is the correct de-coupling from one site's exact key names. Descript still
+  reads **degraded** for two honest reasons the monitor correctly catches: its Enterprise tier
+  has no numeric price ("contact sales") and its Free tier's feature list didn't extract — a
+  real, non-staged heal candidate. Earlier attempts at Linear, Retool, and Resend failed during
+  AI generation; see `TARGETS.md`.
 - **`bdata scraper run <id> <url>` appears to ignore the URL argument.** Tested against three
   increasingly-mutated staged pages and even `https://example.com` — identical output every
   time, matching whatever the collector returned when first created. Bright Data's own docs

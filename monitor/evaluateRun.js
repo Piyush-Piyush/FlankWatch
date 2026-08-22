@@ -4,6 +4,18 @@ function getPath(obj, path) {
   return path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
 }
 
+// A field may declare a single `path` or several `paths` (any-of). Returns
+// the first defined value across the candidate paths — lets one schema
+// accept the same fact under different key shapes across sites.
+function getFieldValue(record, fieldSpec) {
+  const candidates = fieldSpec.paths || [fieldSpec.path];
+  for (const p of candidates) {
+    const v = getPath(record, p);
+    if (v !== undefined && v !== null) return v;
+  }
+  return undefined;
+}
+
 function unwrap(result) {
   return Array.isArray(result) ? result[0] : result;
 }
@@ -34,7 +46,7 @@ export function runRuleChecks(current, lastKnownGood, schema) {
 
   records.forEach((record, idx) => {
     for (const [fieldName, fieldSpec] of Object.entries(schema.fields)) {
-      const value = getPath(record, fieldSpec.path);
+      const value = getFieldValue(record, fieldSpec);
 
       if (fieldSpec.type === "number") {
         if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {

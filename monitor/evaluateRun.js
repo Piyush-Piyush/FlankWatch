@@ -1,4 +1,6 @@
 import { aiSecondPass } from "./aiSecondPass.js";
+import { generateAiDiagnosis } from "../lib/aiDiagnosis.js";
+import { debugLog, logError } from "../lib/logger.js";
 
 function getPath(obj, path) {
   return path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
@@ -145,15 +147,20 @@ export function runRuleChecks(current, lastKnownGood, schema) {
     }
   }
 
-  return { status: reasons.length > 0 ? "degraded" : "healthy", reasons };
+  const verdict = { status: reasons.length > 0 ? "degraded" : "healthy", reasons };
+  debugLog("evaluate", `rule check verdict: ${verdict.status}`, reasons.length ? { reasonCount: reasons.length } : undefined);
+  return verdict;
 }
 
 const HEAL_PROMPT_MAX_CHARS = 1000; // bdata scraper heal's own hard limit
 
-export function generateDiagnosis(reasons) {
+/**
+ * Deterministic template diagnosis — the floor, always available, no
+ * network dependency. Reasons are already full sentences (see
+ * runRuleChecks); join and defensively cap at the CLI's prompt limit.
+ */
+export function generateTemplateDiagnosis(reasons) {
   if (reasons.length === 0) return "";
-  // Each reason is already a full, actionable sentence (see runRuleChecks) —
-  // join as a short list rather than folding into one run-on clause.
   const full = reasons.join(" ");
   if (full.length <= HEAL_PROMPT_MAX_CHARS) return full;
 
@@ -164,6 +171,33 @@ export function generateDiagnosis(reasons) {
   // with nothing sent to Bright Data at all.
   const cut = full.slice(0, HEAL_PROMPT_MAX_CHARS - 3).replace(/\s+\S*$/, "");
   return `${cut}...`;
+}
+
+/**
+ * Writes the heal prompt. Same one-way-advisory discipline as the AI
+ * second pass: an AI-written diagnosis is used only when it succeeds and
+ * there's raw data to give it context — any failure (disabled, no key,
+ * network, bad response) falls straight back to the deterministic
+ * template. A heal must never be blocked on the AI diagnosis writer.
+ */
+export async function generateDiagnosis(reasons, { rawResult, aiEnabled = false, aiApiKey = null } = {}) {
+  if (reasons.length === 0) return "";
+
+  if (aiEnabled && aiApiKey && rawResult) {
+    debugLog("evaluate", "requesting AI-written diagnosis from Gemini");
+    try {
+      const diagnosis = await generateAiDiagnosis(reasons, rawResult, aiApiKey);
+      debugLog("evaluate", `AI diagnosis generated (${diagnosis.length} chars)`);
+      return diagnosis;
+    } catch (err) {
+      logError("evaluate", "AI diagnosis generation failed, falling back to template", err);
+      // fall through to the template — never block a heal on AI availability
+    }
+  } else {
+    debugLog("evaluate", "AI diagnosis skipped (disabled, no key, or no raw result) — using template");
+  }
+
+  return generateTemplateDiagnosis(reasons);
 }
 
 /**
@@ -181,15 +215,19 @@ export async function evaluateRun(current, lastKnownGood, { schema, aiEnabled = 
     return ruleVerdict;
   }
 
+  debugLog("evaluate", "rules say healthy — running AI second pass (Gemini) for a subtler check");
   try {
     const aiVerdict = await aiSecondPass(current, aiApiKey);
     if (aiVerdict.anomaly_detected) {
+      debugLog("evaluate", `AI second pass escalated to degraded: ${aiVerdict.reason}`);
       return {
         status: "degraded",
         reasons: [...ruleVerdict.reasons, `AI review: ${aiVerdict.reason}`],
       };
     }
-  } catch {
+    debugLog("evaluate", "AI second pass found nothing — staying healthy");
+  } catch (err) {
+    logError("evaluate", "AI second pass failed, keeping rule verdict", err);
     // AI advisory pass failing must never block the rule-based verdict.
   }
 

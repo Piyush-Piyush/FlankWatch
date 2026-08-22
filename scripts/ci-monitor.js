@@ -2,6 +2,7 @@ import "dotenv/config";
 import { loadCollectors } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "../api/services/pipeline.js";
 import { triggerHeal, approveHeal } from "../api/services/healService.js";
+import { generateDiagnosis } from "../monitor/evaluateRun.js";
 
 /**
  * Unattended monitor for CI: run each collector, and if it comes back
@@ -18,7 +19,7 @@ import { triggerHeal, approveHeal } from "../api/services/healService.js";
 const collectors = loadCollectors();
 
 const aiEnabled = process.env.AI_ENABLED === "true";
-const aiApiKey = process.env.ANTHROPIC_API_KEY || null;
+const aiApiKey = process.env.GEMINI_API_KEY || null;
 
 let hadUnrecoveredFailure = false;
 
@@ -32,7 +33,7 @@ for (const competitor of Object.keys(collectors)) {
 
   console.log(`degraded: ${result.reasons.join("; ")}`);
   console.log("triggering heal...");
-  const diagnosis = `Scrape output failed sanity checks: ${result.reasons.join("; ")}. Field structure may have changed.`;
+  const diagnosis = await generateDiagnosis(result.reasons, { rawResult: result.result, aiEnabled, aiApiKey });
   const healResult = await triggerHeal(competitor, diagnosis);
   console.log(`heal status: ${healResult.status}`);
 

@@ -1,19 +1,20 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type } from "@google/genai";
+
+const GEMINI_MODEL = "gemini-2.5-flash-lite"; // fast/cheap — appropriate for a lightweight advisory check
 
 const ANOMALY_SCHEMA = {
-  type: "object",
+  type: Type.OBJECT,
   properties: {
     anomaly_detected: {
-      type: "boolean",
+      type: Type.BOOLEAN,
       description: "true if the data looks subtly wrong despite passing field-level checks",
     },
     reason: {
-      type: "string",
+      type: Type.STRING,
       description: "short explanation; empty string if no anomaly",
     },
   },
   required: ["anomaly_detected", "reason"],
-  additionalProperties: false,
 };
 
 /**
@@ -23,7 +24,7 @@ const ANOMALY_SCHEMA = {
  * name. Called only when the rule verdict is already "healthy".
  */
 export async function aiSecondPass(currentResult, apiKey) {
-  const client = new Anthropic({ apiKey });
+  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `You are reviewing scraped competitor pricing data for subtle extraction errors that automated field-type checks would miss (e.g. a price field that technically parses as a number but is clearly wrong, garbled or truncated feature text, a plan name that looks like placeholder/boilerplate text rather than a real plan name).
 
@@ -32,16 +33,15 @@ ${JSON.stringify(currentResult, null, 2)}
 
 Does this data show signs of a subtle extraction problem?`;
 
-  const response = await client.messages.create({
-    model: "claude-opus-4-8",
-    max_tokens: 512,
-    output_config: {
-      effort: "low",
-      format: { type: "json_schema", schema: ANOMALY_SCHEMA },
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: ANOMALY_SCHEMA,
     },
-    messages: [{ role: "user", content: prompt }],
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  return textBlock ? JSON.parse(textBlock.text) : { anomaly_detected: false, reason: "" };
+  const text = (response.text || "").trim();
+  return text ? JSON.parse(text) : { anomaly_detected: false, reason: "" };
 }

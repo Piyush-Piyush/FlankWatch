@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runRuleChecks, generateDiagnosis } from "./evaluateRun.js";
+import { runRuleChecks, generateDiagnosis, generateTemplateDiagnosis } from "./evaluateRun.js";
 import { PRICING_SCHEMA } from "./schemaConfig.js";
 
 const goodRun = [
@@ -134,9 +134,21 @@ test("missing price across many tiers groups into one sentence, staying under th
   ];
   const { status, reasons } = runRuleChecks(manyBroken, null, PRICING_SCHEMA);
   assert.equal(status, "degraded");
-  const diagnosis = generateDiagnosis(reasons);
+  const diagnosis = generateTemplateDiagnosis(reasons);
   assert.ok(diagnosis.length <= 1000, `diagnosis was ${diagnosis.length} chars`);
   assert.ok(diagnosis.includes("Essentials") && diagnosis.includes("Enterprise"));
+});
+
+test("generateDiagnosis falls back to the template when AI is disabled (no network call, no key needed)", async () => {
+  const { reasons } = runRuleChecks([{ pricing_tiers: [] }], null, PRICING_SCHEMA);
+  const diagnosis = await generateDiagnosis(reasons, { aiEnabled: false });
+  assert.equal(diagnosis, generateTemplateDiagnosis(reasons));
+});
+
+test("generateDiagnosis falls back to the template if aiEnabled but no rawResult given", async () => {
+  const { reasons } = runRuleChecks([{ pricing_tiers: [] }], null, PRICING_SCHEMA);
+  const diagnosis = await generateDiagnosis(reasons, { aiEnabled: true, aiApiKey: "fake-key" });
+  assert.equal(diagnosis, generateTemplateDiagnosis(reasons));
 });
 
 test("empty feature list is flagged", () => {

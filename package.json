@@ -5,6 +5,7 @@
   "main": "api/server.js",
   "scripts": {
     "start": "node api/server.js",
+    "debug": "cross-env DEBUG=true node api/server.js",
     "test": "node --test monitor/evaluateRun.test.js",
     "ci-monitor": "node scripts/ci-monitor.js"
   },
@@ -13,7 +14,7 @@
   "license": "ISC",
   "description": "Self-healing competitor pricing monitor built on Bright Data Scraper Studio.",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0",
+    "@google/genai": "^2.18.0",
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "cross-spawn": "^7.0.6",
@@ -22,6 +23,7 @@
     "node-cron": "^4.6.0"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "playwright": "^1.62.1"
   }
 }

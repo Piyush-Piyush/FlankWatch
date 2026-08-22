@@ -5,23 +5,36 @@ import path from "node:path";
 
 import { runCollectorForCompetitor } from "./services/pipeline.js";
 import { insertPendingHeal, runHealJob, markHealPending, runApproveJob, dismissHeal } from "./services/healService.js";
-import { startCollectorCreation, runCreateJob, listPendingCollectors, dismissPending } from "./services/collectorService.js";
+import { startCollectorCreation, runCreateJob, listPendingCollectors, dismissPending, deleteCollector } from "./services/collectorService.js";
 import { getLatestRun, getPreviousHealthyRun, getOpenHeal, getRecentHeals, getResilienceStats } from "./db/queries.js";
 import { loadCollectors, loadSchedules, setSchedule } from "../lib/collectorStore.js";
 import { reloadSchedules } from "./scheduler.js";
 import { diffPricingRuns } from "../lib/diffPricing.js";
 import { generateDigest } from "../lib/digest.js";
 import { generateDiagnosis } from "../monitor/evaluateRun.js";
+import { log, debugLog, logError, isDebug } from "../lib/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_DIR = path.join(__dirname, "..", "dashboard");
 
 const app = express();
 app.use(express.json());
+
+// Request tracing — only in debug mode (npm run debug), keeps normal
+// `npm start` output quiet since the dashboard polls every few seconds.
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  debugLog("http", `--> ${req.method} ${req.originalUrl}`);
+  res.on("finish", () => {
+    debugLog("http", `<-- ${req.method} ${req.originalUrl} ${res.statusCode} (${Date.now() - startedAt}ms)`);
+  });
+  next();
+});
+
 app.use(express.static(DASHBOARD_DIR));
 
 const aiEnabled = process.env.AI_ENABLED === "true";
-const aiApiKey = process.env.ANTHROPIC_API_KEY || null;
+const aiApiKey = process.env.GEMINI_API_KEY || null;
 
 function buildCompetitor(name, config) {
   const latestRun = getLatestRun(name);
@@ -83,6 +96,7 @@ app.get("/api/digest", async (req, res) => {
     const digest = await generateDigest(competitorDiffs, { aiEnabled, aiApiKey });
     res.json({ digest });
   } catch (err) {
+    logError("http", "GET /api/digest failed", err);
     res.status(500).json({ error: String(err.message ?? err) });
   }
 });
@@ -100,6 +114,7 @@ app.post("/api/competitors/:name/run", async (req, res) => {
     const result = await runCollectorForCompetitor(req.params.name, { aiEnabled, aiApiKey, url: req.body?.url });
     res.json(result);
   } catch (err) {
+    logError("http", `POST /api/competitors/${req.params.name}/run failed`, err);
     res.status(500).json({ error: String(err.message ?? err) });
   }
 });
@@ -107,12 +122,13 @@ app.post("/api/competitors/:name/run", async (req, res) => {
 // Heal and approve kick off multi-minute Bright Data AI-Flow jobs, so both
 // respond immediately with a pending state and finish the work in the
 // background — the dashboard polls /api/competitors for the result.
-app.post("/api/competitors/:name/heal", (req, res) => {
+app.post("/api/competitors/:name/heal", async (req, res) => {
   try {
     const competitor = req.params.name;
     const latestRun = getLatestRun(competitor);
     const reasons = latestRun ? JSON.parse(latestRun.reasons || "[]") : [];
-    const diagnosis = req.body?.diagnosis || generateDiagnosis(reasons) || null;
+    const rawResult = latestRun ? JSON.parse(latestRun.raw_json) : null;
+    const diagnosis = req.body?.diagnosis || (await generateDiagnosis(reasons, { rawResult, aiEnabled, aiApiKey })) || null;
     if (!diagnosis) {
       res.status(400).json({ error: "diagnosis is required (no degraded reasons on file to auto-generate one)" });
       return;
@@ -120,8 +136,9 @@ app.post("/api/competitors/:name/heal", (req, res) => {
 
     const healId = insertPendingHeal(competitor, diagnosis);
     res.status(202).json({ healId, status: "healing" });
-    runHealJob(healId, competitor, diagnosis).catch((err) => console.error(`heal job ${healId} failed:`, err));
+    runHealJob(healId, competitor, diagnosis).catch((err) => logError("heal", `heal job ${healId} failed`, err));
   } catch (err) {
+    logError("http", `POST /api/competitors/${req.params.name}/heal failed`, err);
     res.status(500).json({ error: String(err.message ?? err) });
   }
 });
@@ -132,8 +149,9 @@ app.post("/api/competitors/:name/approve", (req, res) => {
     const reject = Boolean(req.body?.reject);
     const heal = markHealPending(competitor, { reject });
     res.status(202).json({ healId: heal.id, status: reject ? "rejecting" : "approving" });
-    runApproveJob(heal.id, competitor, { reject }).catch((err) => console.error(`approve job ${heal.id} failed:`, err));
+    runApproveJob(heal.id, competitor, { reject }).catch((err) => logError("approve", `approve job ${heal.id} failed`, err));
   } catch (err) {
+    logError("http", `POST /api/competitors/${req.params.name}/approve failed`, err);
     res.status(500).json({ error: String(err.message ?? err) });
   }
 });
@@ -146,6 +164,7 @@ app.post("/api/competitors/:name/dismiss-heal", (req, res) => {
     dismissHeal(req.params.name);
     res.json({ ok: true });
   } catch (err) {
+    logError("http", `POST /api/competitors/${req.params.name}/dismiss-heal failed`, err);
     res.status(400).json({ error: String(err.message ?? err) });
   }
 });
@@ -158,8 +177,9 @@ app.post("/api/collectors", (req, res) => {
     const { name, url, category, description } = req.body || {};
     const { pendingId, name: slug } = startCollectorCreation({ name, url, category, description });
     res.status(202).json({ pendingId, name: slug, status: "creating" });
-    runCreateJob(pendingId).catch((err) => console.error(`create job ${pendingId} failed:`, err));
+    runCreateJob(pendingId).catch((err) => logError("create", `create job ${pendingId} failed`, err));
   } catch (err) {
+    logError("http", "POST /api/collectors failed", err);
     res.status(400).json({ error: String(err.message ?? err) });
   }
 });
@@ -169,6 +189,20 @@ app.delete("/api/collectors/pending/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Stops tracking a competitor and wipes its history. Bright Data has no
+// programmatic delete for the scraper template itself — this only removes
+// it from FlankWatch. If it was the last one in its category, that
+// category's schedule is cleared too (see deleteCollector).
+app.delete("/api/competitors/:name", (req, res) => {
+  try {
+    deleteCollector(req.params.name);
+    res.json({ ok: true });
+  } catch (err) {
+    logError("http", `DELETE /api/competitors/${req.params.name} failed`, err);
+    res.status(400).json({ error: String(err.message ?? err) });
+  }
+});
+
 // Per-category schedule. Body: { cron: "0 9 * * *" } to set, { cron: null } to clear.
 app.put("/api/schedules/:category", (req, res) => {
   try {
@@ -176,12 +210,14 @@ app.put("/api/schedules/:category", (req, res) => {
     reloadSchedules({ aiEnabled, aiApiKey });
     res.json({ schedules });
   } catch (err) {
+    logError("http", `PUT /api/schedules/${req.params.category} failed`, err);
     res.status(400).json({ error: String(err.message ?? err) });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`FlankWatch dashboard running at http://localhost:${PORT}`);
+  log("server", `FlankWatch dashboard running at http://localhost:${PORT}`);
+  log("server", `debug logging: ${isDebug ? "ON" : "off (run 'npm run debug' to enable)"}, AI: ${aiEnabled ? "on (Gemini)" : "off"}`);
   reloadSchedules({ aiEnabled, aiApiKey });
 });

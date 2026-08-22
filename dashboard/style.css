@@ -59,13 +59,26 @@ body {
 .brand {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
 }
 
 .brand-mark {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.brand-mark::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border-radius: 3px;
+  transform: rotate(45deg) translateY(-1px);
 }
 
 .brand-sub {
@@ -104,9 +117,49 @@ body {
   margin: 0 0 12px;
 }
 
+/* ---------- overview stat tiles ---------- */
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.stat-tile {
+  background: var(--card-bg);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-primary);
+}
+
+.stat-value.accent { color: var(--accent); }
+.stat-value.good { color: var(--good); }
+.stat-value.warning { color: var(--warning); }
+
+.stat-label {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .competitor-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 400px));
   gap: 16px;
 }
 
@@ -115,6 +168,7 @@ body {
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   padding: 18px;
@@ -122,6 +176,11 @@ body {
   flex-direction: column;
   gap: 14px;
 }
+
+.card--healthy { border-left-color: var(--good); }
+.card--degraded { border-left-color: var(--critical); }
+.card--healing { border-left-color: var(--warning); }
+.card--review { border-left-color: var(--review); }
 
 .card-header {
   display: flex;
@@ -137,8 +196,10 @@ body {
 }
 
 .card-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: capitalize;
 }
 
 .card-url {
@@ -208,7 +269,7 @@ body {
 .pricing-table tr:last-child td { border-bottom: none; }
 
 .plan-name { font-weight: 600; }
-.plan-price { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plan-price { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 700; color: var(--accent); }
 .plan-period { color: var(--ink-secondary); font-size: 12px; }
 
 /* ---------- diff panel ---------- */

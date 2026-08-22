@@ -5,6 +5,7 @@ const healLogPanel = document.getElementById("heal-log-panel");
 const topbarMeta = document.getElementById("topbar-meta");
 const digestSection = document.getElementById("digest-section");
 const digestPanel = document.getElementById("digest-panel");
+const statRow = document.getElementById("stat-row");
 
 const inFlight = new Set(); // competitor names currently mid-action, to disable their buttons
 
@@ -40,22 +41,27 @@ const HEAL_STATUS_LABEL = {
   needs_review: "Needs review",
 };
 
-function statusPill(competitor) {
+// Single source of truth for a competitor's overall state — drives both
+// the status pill and the card's left-border accent color.
+function competitorState(competitor) {
   const { latestRun, openHeal } = competitor;
+  if (openHeal && openHeal.status === "needs_review") return "review";
+  if (openHeal) return "healing";
+  if (!latestRun) return "healing"; // "no data yet" reads as pending, not an error
+  return latestRun.status === "degraded" ? "degraded" : "healthy";
+}
 
-  if (openHeal && openHeal.status === "needs_review") {
-    return `<span class="pill pill-review"><span class="pill-dot"></span>Needs review</span>`;
-  }
-  if (openHeal) {
-    return `<span class="pill pill-healing"><span class="pill-dot"></span>Healing</span>`;
-  }
-  if (!latestRun) {
-    return `<span class="pill pill-healing"><span class="pill-dot"></span>No data yet</span>`;
-  }
-  if (latestRun.status === "degraded") {
-    return `<span class="pill pill-degraded"><span class="pill-dot"></span>Degraded</span>`;
-  }
-  return `<span class="pill pill-healthy"><span class="pill-dot"></span>Healthy</span>`;
+const STATE_PILL_LABEL = {
+  healthy: "Healthy",
+  degraded: "Degraded",
+  healing: "Healing",
+  review: "Needs review",
+};
+
+function statusPill(competitor) {
+  const state = competitorState(competitor);
+  const text = !competitor.latestRun && !competitor.openHeal ? "No data yet" : STATE_PILL_LABEL[state];
+  return `<span class="pill pill-${state}"><span class="pill-dot"></span>${text}</span>`;
 }
 
 function pricingTable(latestRun) {
@@ -132,13 +138,35 @@ function resilienceLine(resilience) {
   return `<span class="resilience-line">${parts.join(" · ")}</span>`;
 }
 
+function statTiles(competitors) {
+  const withRuns = competitors.filter((c) => c.resilience && c.resilience.totalRuns > 0);
+  const avgUptime = withRuns.length ? Math.round((withRuns.reduce((sum, c) => sum + c.resilience.uptimePct, 0) / withRuns.length) * 10) / 10 : null;
+  const totalHeals = competitors.reduce((sum, c) => sum + (c.resilience?.healCount || 0), 0);
+  const activeCount = competitors.filter((c) => {
+    const s = competitorState(c);
+    return s === "degraded" || s === "healing" || s === "review";
+  }).length;
+
+  const tiles = [
+    { label: "Competitors tracked", value: competitors.length, cls: "" },
+    { label: "Avg uptime", value: avgUptime != null ? `${avgUptime}%` : "—", cls: "good" },
+    { label: "Heals to date", value: totalHeals, cls: "accent" },
+    { label: "Needs attention", value: activeCount, cls: activeCount > 0 ? "warning" : "" },
+  ];
+
+  return tiles
+    .map((t) => `<div class="stat-tile"><span class="stat-value ${t.cls}">${t.value}</span><span class="stat-label">${t.label}</span></div>`)
+    .join("");
+}
+
 function competitorCard(competitor) {
   const { name, url, latestRun, openHeal } = competitor;
   const busy = inFlight.has(name);
   const canHeal = latestRun && latestRun.status === "degraded" && !openHeal;
+  const state = competitorState(competitor);
 
   return `
-    <article class="card" data-name="${escapeHtml(name)}">
+    <article class="card card--${state}" data-name="${escapeHtml(name)}">
       <div class="card-header">
         <div class="card-title-group">
           <span class="card-title">${escapeHtml(name)}</span>
@@ -196,7 +224,14 @@ async function refresh() {
       fetchJson("/api/digest"),
     ]);
 
-    topbarMeta.textContent = `AI review: ${aiEnabled ? "on" : "off"}`;
+    const lastChecked = competitors
+      .map((c) => c.latestRun?.runTimestamp)
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+    topbarMeta.textContent = `AI review: ${aiEnabled ? "on" : "off"} · Last checked: ${lastChecked ? formatTime(lastChecked) : "—"}`;
+
+    statRow.innerHTML = statTiles(competitors);
 
     grid.innerHTML = competitors.length ? competitors.map(competitorCard).join("") : `<p class="empty-note">No competitors configured yet.</p>`;
 

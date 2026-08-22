@@ -127,7 +127,8 @@ body {
   color: var(--ink-secondary);
 }
 
-.field input {
+.field input,
+.field select {
   font-family: var(--font-sans);
   font-size: 14px;
   color: var(--ink-primary);
@@ -137,7 +138,12 @@ body {
   padding: 9px 11px;
 }
 
-.field input:focus {
+.field select {
+  cursor: pointer;
+}
+
+.field input:focus,
+.field select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-tint);

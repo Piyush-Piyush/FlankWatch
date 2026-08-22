@@ -5,7 +5,8 @@
   "main": "api/server.js",
   "scripts": {
     "start": "node api/server.js",
-    "test": "node --test monitor/evaluateRun.test.js"
+    "test": "node --test monitor/evaluateRun.test.js",
+    "ci-monitor": "node scripts/ci-monitor.js"
   },
   "keywords": [],
   "author": "",

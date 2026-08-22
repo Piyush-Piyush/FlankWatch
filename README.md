@@ -19,7 +19,8 @@ Built for a hackathon judged on Best Use of Bright Data, Best UI, and Best Clean
   server.js         Express app — REST API + serves /dashboard statically.
 /dashboard          Vanilla HTML/CSS/JS. No framework — full control over the visual design,
                      zero build step.
-/scripts            Manual verification tools (see "Reproducing the demo" below).
+/scripts            Manual verification tools (see "Reproducing the demo" below) plus the
+                     CI entrypoint (ci-monitor.js) run by the GitHub Actions workflow.
 ```
 
 **Why /collectors and /heal-orchestrator are separate from /api:** those two folders are
@@ -68,6 +69,22 @@ or in the dashboard's heal log once the server is running.
 To verify the dashboard itself renders and behaves correctly (used during development, not
 required to run the app): `node scripts/screenshot.js http://localhost:3000 out.png` —
 launches headless Chromium, screenshots the page, and reports any console errors.
+
+## Continuous monitoring (GitHub Actions)
+
+`.github/workflows/self-heal-monitor.yml` runs `scripts/ci-monitor.js` on a daily cron (plus a
+manual "Run workflow" button for demos). It checks every collector in `collectors.json`; if one
+comes back degraded, it triggers heal and **approves automatically** — unattended, no human in
+the loop. That's the one place auto-approve is the right call: the live demo keeps approval
+manual on purpose (Phase 4's human-in-the-loop story), but a 3am cron job has no one to click
+"Approve". The job exits non-zero only when a heal doesn't reach `awaiting_approval` or an
+approve lands in `needs_review` — i.e. the green checkmark itself is evidence the self-healing
+loop is working, not just that the job ran.
+
+Requires two repo secrets:
+- `BRIGHT_DATA_API_KEY` — from the Bright Data dashboard (Settings → API key), used with
+  `bdata login -k` since the normal browser OAuth flow doesn't work in CI.
+- `ANTHROPIC_API_KEY` — optional, only needed if the `AI_ENABLED` repo variable is set to `true`.
 
 ## Honest status notes
 

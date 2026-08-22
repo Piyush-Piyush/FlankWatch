@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "type": "module",
   "main": "api/server.js",
+  "bin": {
+    "flankwatch": "bin/cli.js"
+  },
   "scripts": {
     "start": "node api/server.js",
     "debug": "cross-env DEBUG=true node api/server.js",
+    "cli": "node bin/cli.js",
     "test": "node --test monitor/evaluateRun.test.js",
     "ci-monitor": "node scripts/ci-monitor.js"
   },
@@ -17,6 +21,7 @@
     "@google/genai": "^2.18.0",
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
+    "commander": "^15.0.0",
     "cross-spawn": "^7.0.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

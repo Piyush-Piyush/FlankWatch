@@ -1,24 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
 import { db } from "../db/index.js";
+import { getCollector as getCollectorConfig } from "../../lib/collectorStore.js";
 import { healCollector } from "../../heal-orchestrator/healCollector.js";
 import { approveCollector } from "../../heal-orchestrator/approveCollector.js";
 import { runCollectorForCompetitor } from "./pipeline.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const COLLECTORS_PATH = path.join(__dirname, "..", "..", "collectors", "collectors.json");
-
-function loadCollectors() {
-  return JSON.parse(readFileSync(COLLECTORS_PATH, "utf-8"));
-}
-
-function getCollectorConfig(competitor) {
-  const collectors = loadCollectors();
-  const config = collectors[competitor];
-  if (!config) throw new Error(`Unknown competitor: ${competitor}`);
-  return config;
-}
 
 function getMostRecentHeal(competitor) {
   return db.prepare("SELECT * FROM heals WHERE competitor = ? ORDER BY triggered_at DESC LIMIT 1").get(competitor);

@@ -1,6 +1,5 @@
 import "dotenv/config";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { loadCollectors } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "../api/services/pipeline.js";
 import { triggerHeal, approveHeal } from "../api/services/healService.js";
 
@@ -16,8 +15,7 @@ import { triggerHeal, approveHeal } from "../api/services/healService.js";
  * needs a human — a heal that didn't reach awaiting_approval, or an
  * approve that landed in needs_review.
  */
-const collectorsPath = fileURLToPath(new URL("../collectors/collectors.json", import.meta.url));
-const collectors = JSON.parse(readFileSync(collectorsPath, "utf-8"));
+const collectors = loadCollectors();
 
 const aiEnabled = process.env.AI_ENABLED === "true";
 const aiApiKey = process.env.ANTHROPIC_API_KEY || null;

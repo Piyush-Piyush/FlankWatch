@@ -1,17 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
 import { db } from "../db/index.js";
+import { getCollector } from "../../lib/collectorStore.js";
 import { runCollector } from "../../collectors/runCollector.js";
 import { evaluateRun, generateDiagnosis } from "../../monitor/evaluateRun.js";
 import { PRICING_SCHEMA } from "../../monitor/schemaConfig.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const COLLECTORS_PATH = path.join(__dirname, "..", "..", "collectors", "collectors.json");
-
-function loadCollectors() {
-  return JSON.parse(readFileSync(COLLECTORS_PATH, "utf-8"));
-}
 
 function countFields(value) {
   if (value == null) return 0;
@@ -33,9 +24,7 @@ function getLastGoodRun(competitor) {
  * redesign" demo trigger call.
  */
 export async function runCollectorForCompetitor(competitor, { aiEnabled = false, aiApiKey = null, url } = {}) {
-  const collectors = loadCollectors();
-  const config = collectors[competitor];
-  if (!config) throw new Error(`Unknown competitor: ${competitor}`);
+  const config = getCollector(competitor);
 
   const targetUrl = url || config.url;
   const result = await runCollector(config.collector_id, targetUrl);

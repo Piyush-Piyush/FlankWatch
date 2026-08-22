@@ -3,7 +3,11 @@ import { getCollector as getCollectorConfig } from "../../lib/collectorStore.js"
 import { healCollector } from "../../heal-orchestrator/healCollector.js";
 import { approveCollector } from "../../heal-orchestrator/approveCollector.js";
 import { runCollectorForCompetitor } from "./pipeline.js";
+import { generateDiagnosis } from "../../monitor/evaluateRun.js";
+import { countHealAttemptsSinceLastHealthy } from "../db/queries.js";
 import { log, debugLog, logError } from "../../lib/logger.js";
+
+const MAX_AUTO_HEAL_RETRIES = 3;
 
 function getMostRecentHeal(competitor) {
   return db.prepare("SELECT * FROM heals WHERE competitor = ? ORDER BY triggered_at DESC LIMIT 1").get(competitor);
@@ -96,6 +100,50 @@ export async function approveHeal(competitor, { reject = false } = {}) {
   await runApproveJob(heal.id, competitor, { reject });
   const row = db.prepare("SELECT * FROM heals WHERE id = ?").get(heal.id);
   return { healId: heal.id, status: row.status, error: row.error };
+}
+
+/**
+ * Full unattended recovery: degraded -> diagnose -> heal -> approve ->
+ * verify, no human click required. Single source of truth for that chain
+ * so the scheduler, the manual "Run now" button, and the CI monitor all
+ * drive the same behavior instead of three copies of this sequencing.
+ *
+ * Capped at MAX_AUTO_HEAL_RETRIES attempts since the last healthy run —
+ * a site that keeps breaking the same way isn't going to be fixed by a
+ * 4th identical AI-Flow call, and every attempt is a real Bright Data
+ * job. Past the cap this stops burning attempts and leaves a
+ * needs_review row for a human, same as any other stuck heal.
+ */
+export async function autoHealAndApprove(competitor, reasons, rawResult, { aiEnabled = false, aiApiKey = null } = {}) {
+  const attempts = countHealAttemptsSinceLastHealthy(competitor);
+  if (attempts >= MAX_AUTO_HEAL_RETRIES) {
+    const config = getCollectorConfig(competitor);
+    const error = `Auto-heal gave up after ${MAX_AUTO_HEAL_RETRIES} attempts since the last healthy run — click Heal to retry manually.`;
+    db.prepare(
+      `INSERT INTO heals (collector_id, competitor, triggered_at, diagnosis, preview_result, approved_at, status, error)
+       VALUES (?, ?, ?, ?, NULL, NULL, 'needs_review', ?)`
+    ).run(config.collector_id, competitor, new Date().toISOString(), `(skipped — retry cap reached)`, error);
+    logError("auto-heal", `[${competitor}] ${attempts} attempts since last healthy, cap is ${MAX_AUTO_HEAL_RETRIES} — needs manual intervention`, new Error(error));
+    return { status: "needs_review", error };
+  }
+
+  log("auto-heal", `[${competitor}] degraded (attempt ${attempts + 1}/${MAX_AUTO_HEAL_RETRIES}), auto-triggering heal`, { reasons });
+  const diagnosis = await generateDiagnosis(reasons, { rawResult, aiEnabled, aiApiKey });
+  const healResult = await triggerHeal(competitor, diagnosis);
+
+  if (healResult.status !== "awaiting_approval") {
+    logError("auto-heal", `[${competitor}] heal did not reach awaiting_approval (got "${healResult.status}")`, new Error(healResult.error ?? healResult.status));
+    return healResult;
+  }
+
+  log("auto-heal", `[${competitor}] heal ready, auto-approving`);
+  const approveResult = await approveHeal(competitor);
+  if (approveResult.status === "needs_review") {
+    logError("auto-heal", `[${competitor}] auto-approve failed`, new Error(approveResult.error));
+  } else {
+    log("auto-heal", `[${competitor}] healed and verified recovered`);
+  }
+  return approveResult;
 }
 
 /**

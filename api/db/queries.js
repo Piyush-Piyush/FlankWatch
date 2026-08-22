@@ -23,6 +23,15 @@ export function getRecentHeals(limit = 50) {
   return db.prepare("SELECT * FROM heals ORDER BY triggered_at DESC LIMIT ?").all(limit);
 }
 
+/** Heal attempts logged since the last time this competitor was healthy — the auto-heal retry budget. */
+export function countHealAttemptsSinceLastHealthy(competitor) {
+  const lastHealthy = db
+    .prepare("SELECT run_timestamp FROM runs WHERE competitor = ? AND status = 'healthy' ORDER BY run_timestamp DESC LIMIT 1")
+    .get(competitor);
+  const since = lastHealthy ? lastHealthy.run_timestamp : "0000-00-00T00:00:00.000Z";
+  return db.prepare("SELECT COUNT(*) as count FROM heals WHERE competitor = ? AND triggered_at > ?").get(competitor, since).count;
+}
+
 /**
  * Wipes a competitor's history (runs, heals, any pending build record) when
  * it's removed from tracking — otherwise deleted competitors keep showing

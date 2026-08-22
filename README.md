@@ -1,8 +1,10 @@
 # FlankWatch
 
-A competitor pricing monitor that **survives the website changing.** It scrapes competitor pricing pages via Bright Data Scraper Studio, detects when the extracted data looks wrong, diagnoses what likely broke, triggers Bright Data's AI self-healing, and shows a human the proposed fix before anything is approved — the whole `detect → diagnose → heal → preview → approve → verify` loop, visible on a live dashboard.
+A competitor pricing monitor that **survives the website changing.** It scrapes competitor pricing pages via Bright Data Scraper Studio, detects when the extracted data looks wrong, diagnoses what likely broke, and triggers Bright Data's AI self-healing — the whole `detect → diagnose → heal → approve → verify` loop runs unattended, with every step visible on a live dashboard as it happens.
 
 Competitors are organized into **groups/segments** (API tools, video editing, smartphones, …), each with its own schedule. New competitors are added **on demand from the dashboard** — type a name + pricing URL + group, and Bright Data's AI builds the scraper in the background; nothing is hardcoded to a specific site.
+
+When any run — scheduled, manual "Run now", or CI — comes back degraded, the fix is **fully automatic**: diagnose → heal → approve → verify, no click required. See "Self-healing is automatic" below.
 
 Built for a hackathon judged on Best Use of Bright Data, Best UI, and Best Clean Code.
 
@@ -80,7 +82,7 @@ Requires Node ≥ 22.13 (the `bdata` CLI's dependencies reject older versions).
 
 ## The AI toggle
 
-Uses Google Gemini (`gemini-2.5-flash-lite` — free-tier friendly, fast, cheap; get a key at
+Uses Google Gemini (`gemini-3.5-flash-lite` — free-tier friendly, fast, cheap; get a key at
 [aistudio.google.com/apikey](https://aistudio.google.com/apikey)), gated everywhere behind one
 `AI_ENABLED` + `GEMINI_API_KEY` pair, three touchpoints:
 
@@ -115,16 +117,33 @@ To verify the dashboard itself renders and behaves correctly (used during develo
 required to run the app): `node scripts/screenshot.js http://localhost:3000 out.png` —
 launches headless Chromium, screenshots the page, and reports any console errors.
 
+## Self-healing is automatic
+
+Detect → diagnose → heal → approve → verify runs unattended, everywhere: a scheduled group run, a
+manual "Run now" click, and the CI monitor (below) all funnel into the same
+`autoHealAndApprove()` (`api/services/healService.js`) the instant a run comes back degraded —
+no click needed to fix it. The dashboard's heal log still shows every step live (diagnosis,
+preview, approve, verify) as it happens, and the per-card **Heal** button stays available for a
+manual retry (e.g. a heal that landed in `needs_review`). One function, one place the
+diagnose-heal-approve-verify sequence is written, called by the scheduler, the `/run` route, and
+`scripts/ci-monitor.js` alike — no duplicated orchestration logic across those three trigger
+sources.
+
+Capped at **3 auto-heal attempts** since the last healthy run — a site whose AI-Flow fix didn't
+stick twice in a row isn't likely fixed by identical attempt #4, and every attempt is a real
+Bright Data job. Past the cap, auto-heal stops burning attempts and leaves a `needs_review` row
+(`countHealAttemptsSinceLastHealthy()` in `api/db/queries.js`) for a human — same dashboard
+Dismiss/manual-Heal path as any other stuck heal. The counter resets naturally the moment the
+competitor is healthy again.
+
 ## Continuous monitoring (GitHub Actions)
 
 `.github/workflows/self-heal-monitor.yml` runs `scripts/ci-monitor.js` on a daily cron (plus a
-manual "Run workflow" button for demos). It checks every collector in `collectors.json`; if one
-comes back degraded, it triggers heal and **approves automatically** — unattended, no human in
-the loop. That's the one place auto-approve is the right call: the live demo keeps approval
-manual on purpose (Phase 4's human-in-the-loop story), but a 3am cron job has no one to click
-"Approve". The job exits non-zero only when a heal doesn't reach `awaiting_approval` or an
-approve lands in `needs_review` — i.e. the green checkmark itself is evidence the self-healing
-loop is working, not just that the job ran.
+manual "Run workflow" button for demos). It checks every collector in `collectors.json` and relies
+on the same automatic heal-and-approve path described above — unattended, no human in the loop.
+The job exits non-zero only when a heal doesn't reach `awaiting_approval` or an approve lands in
+`needs_review` — i.e. the green checkmark itself is evidence the self-healing loop is working, not
+just that the job ran.
 
 Requires two repo secrets:
 - `BRIGHT_DATA_API_KEY` — from the Bright Data dashboard (Settings → API key), used with

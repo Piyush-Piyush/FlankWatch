@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { loadSchedules, loadCollectorsByCategory } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "./services/pipeline.js";
+import { autoHealAndApprove } from "./services/healService.js";
 import { log, debugLog, logError } from "../lib/logger.js";
 
 const active = new Map(); // category -> scheduled cron task
@@ -41,7 +42,14 @@ export function reloadSchedules({ aiEnabled = false, aiApiKey = null } = {}) {
       log("scheduler", `firing for category "${category}"`, { competitorCount: collectors.length });
       for (const c of collectors) {
         try {
-          await runCollectorForCompetitor(c.name, { aiEnabled, aiApiKey });
+          const result = await runCollectorForCompetitor(c.name, { aiEnabled, aiApiKey });
+          if (result.status !== "healthy") {
+            // Fire-and-forget: heal+approve is multi-minute, don't block the
+            // rest of this category's run on it.
+            autoHealAndApprove(c.name, result.reasons, result.result, { aiEnabled, aiApiKey }).catch((err) =>
+              logError("scheduler", `auto-heal failed for ${c.name}`, err)
+            );
+          }
         } catch (err) {
           logError("scheduler", `scheduled run failed for ${c.name}`, err);
         }

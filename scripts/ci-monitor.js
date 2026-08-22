@@ -1,8 +1,7 @@
 import "dotenv/config";
 import { loadCollectors } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "../api/services/pipeline.js";
-import { triggerHeal, approveHeal } from "../api/services/healService.js";
-import { generateDiagnosis } from "../monitor/evaluateRun.js";
+import { autoHealAndApprove } from "../api/services/healService.js";
 
 /**
  * Unattended monitor for CI: run each collector, and if it comes back
@@ -32,23 +31,12 @@ for (const competitor of Object.keys(collectors)) {
   if (result.status === "healthy") continue;
 
   console.log(`degraded: ${result.reasons.join("; ")}`);
-  console.log("triggering heal...");
-  const diagnosis = await generateDiagnosis(result.reasons, { rawResult: result.result, aiEnabled, aiApiKey });
-  const healResult = await triggerHeal(competitor, diagnosis);
-  console.log(`heal status: ${healResult.status}`);
-
-  if (healResult.status !== "awaiting_approval") {
-    console.error(`heal did not reach awaiting_approval (got "${healResult.status}") — needs human review`);
-    hadUnrecoveredFailure = true;
-    continue;
-  }
-
-  console.log("approving heal...");
-  const approveResult = await approveHeal(competitor);
-  console.log(`approve status: ${approveResult.status}`);
+  console.log("auto-healing...");
+  const approveResult = await autoHealAndApprove(competitor, result.reasons, result.result, { aiEnabled, aiApiKey });
+  console.log(`final status: ${approveResult.status}`);
 
   if (approveResult.status === "needs_review") {
-    console.error(`approve failed: ${approveResult.error}`);
+    console.error(`heal did not fully recover (status "${approveResult.status}"): ${approveResult.error ?? ""}`);
     hadUnrecoveredFailure = true;
   } else {
     console.log(`${competitor} healed and verified recovered.`);

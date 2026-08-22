@@ -6,14 +6,6 @@
     "category": "API tools",
     "status": "verified"
   },
-  "descript": {
-    "url": "https://www.descript.com/pricing",
-    "collector_id": "c_mt4s53ah1sv8qmgngx",
-    "description": "Extract ALL pricing tiers shown on the page (every plan card, not just one). For each tier: plan name, price value, currency, billing period (monthly/annual), full list of feature bullets.",
-    "category": "Video editing",
-    "status": "verified",
-    "created_at": "2026-08-22T19:39:49.588Z"
-  },
   "insomnia": {
     "url": "https://insomnia.rest/pricing",
     "collector_id": "c_mt4t4imj1072ulzfzf",

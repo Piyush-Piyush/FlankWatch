@@ -6,9 +6,34 @@ Competitors are organized into **groups/segments** (API tools, video editing, sm
 
 Built for a hackathon judged on Best Use of Bright Data, Best UI, and Best Clean Code.
 
-## Adding competitors & groups (on-demand, no code change)
+## Adding, grouping, and removing competitors (on-demand, no code change)
 
-Click **+ Add competitor**, give it a name, pricing-page URL, and a group name (e.g. "Video editing"). That fires `bdata scraper create` in the background — the new competitor appears in its group as **Building…** while Bright Data's AI generates the scraper (a few minutes), then flips to a live card once it's built and verified. Each group has a **schedule** dropdown (hourly / daily / weekly) that runs every collector in that segment on a cron via `node-cron`. The registry lives in `collectors/collectors.json`; the store module (`lib/collectorStore.js`) is the only writer.
+Click **+ Add competitor**, give it a name and a pricing-page URL. The **Group / segment** field
+is a dropdown of existing groups plus a **+ New group…** option — pick one or type a brand new
+group name inline. Submitting fires `bdata scraper create` in the background — the new
+competitor appears in its group as **Building…** while Bright Data's AI generates the scraper (a
+few minutes), then flips to a live card once it's built and verified.
+
+Each group has a **schedule** dropdown (hourly / daily / weekly) that runs every collector in
+that segment on a cron via `node-cron`. Click the **×** on any card to stop tracking that
+competitor — it's a confirm-gated destructive action: it removes the collector from the registry
+and wipes its run/heal history. Groups aren't a separate stored entity, so a group with no
+collectors left in it just stops appearing on its own; if it had a schedule, that's cleared too
+(a cron for zero collectors is meaningless clutter, not something to leave orphaned). Note: Bright
+Data has no programmatic delete for the scraper template itself, so this only stops FlankWatch
+from tracking it — the underlying collector still exists on Bright Data's side.
+
+The registry lives in `collectors/collectors.json`; the store module (`lib/collectorStore.js`) is
+the only writer.
+
+## Debug mode
+
+`npm run debug` (vs. plain `npm start`) sets `DEBUG=true` and prints a full step-by-step trace to
+the terminal: every HTTP request/response, every `bdata` CLI spawn with timing, rule-check
+verdicts, Gemini calls with prompt/response sizes, and heal/approve/create job transitions.
+`npm start` stays quiet — the dashboard polls every 4 seconds, so full tracing there is noisy by
+default. The logger (`lib/logger.js`) is shared everywhere: `debugLog()` (gated, verbose),
+`log()` (always-on lifecycle events), `logError()` (always-on, with the real error object).
 
 ## Architecture
 
@@ -47,7 +72,7 @@ buzzword copy) in favor of a warm, minimal, data-dense layout.
 ```bash
 npm install
 npx -p @brightdata/cli bdata login   # opens a browser, stores credentials in the CLI's own config
-cp .env.example .env                 # optional: set AI_ENABLED=true + ANTHROPIC_API_KEY for the AI toggle
+cp .env.example .env                 # optional: set AI_ENABLED=true + GEMINI_API_KEY for the AI toggle
 npm start                            # http://localhost:3000
 ```
 
@@ -55,13 +80,25 @@ Requires Node ≥ 22.13 (the `bdata` CLI's dependencies reject older versions).
 
 ## The AI toggle
 
-`evaluate_run()` is rule-based and deterministic by default — it never depends on an external
-API being up. If `AI_ENABLED=true` and `ANTHROPIC_API_KEY` is set, a second advisory pass
-(Claude Opus 4.8, low effort) can *escalate* a `healthy` verdict to `degraded` if it spots
-something the rules missed. It can never downgrade a rule-flagged `degraded` back to `healthy`,
-and any failure of the AI call (bad key, network, rate limit) silently falls back to the rule
-verdict — the detection floor never depends on AI availability. The same toggle also gates the
-weekly digest's AI-written summary (falls back to a plain template sentence otherwise).
+Uses Google Gemini (`gemini-2.5-flash-lite` — free-tier friendly, fast, cheap; get a key at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey)), gated everywhere behind one
+`AI_ENABLED` + `GEMINI_API_KEY` pair, three touchpoints:
+
+- **Anomaly second pass** (`monitor/aiSecondPass.js`) — `evaluate_run()` is rule-based and
+  deterministic by default, never depending on an external API being up. When enabled, this can
+  *escalate* a `healthy` verdict to `degraded` if it spots something the rules missed (e.g. a
+  price that technically parses as a number but is clearly wrong). It can never downgrade a
+  rule-flagged `degraded` back to `healthy`.
+- **AI-written heal diagnoses** (`lib/aiDiagnosis.js`) — writing a good heal prompt is a language
+  task, not a rule-matching one (see "Honest status notes" below for exactly why this exists).
+  Given the raw broken records — not just the rule engine's summarized reasons — a model can
+  notice things a template can't: literal "Custom" text, a discount badge merged into a plan
+  name, a price nested under an unanticipated key.
+- **Weekly digest summary** (`lib/digest.js`) — turns a pricing diff into a plain-English sentence.
+
+Every one of these falls back to deterministic behavior (the rule verdict, the template
+diagnosis, a template digest sentence) on any failure — disabled, missing key, network error, bad
+response. AI is additive everywhere; nothing in the core loop depends on it being available.
 
 ## Reproducing the demo locally
 
@@ -92,23 +129,30 @@ loop is working, not just that the job ran.
 Requires two repo secrets:
 - `BRIGHT_DATA_API_KEY` — from the Bright Data dashboard (Settings → API key), used with
   `bdata login -k` since the normal browser OAuth flow doesn't work in CI.
-- `ANTHROPIC_API_KEY` — optional, only needed if the `AI_ENABLED` repo variable is set to `true`.
+- `GEMINI_API_KEY` — optional, only needed if the `AI_ENABLED` repo variable is set to `true`.
 
 ## Honest status notes
 
 A few things worth knowing if picking this back up:
 
-- **Two live collectors in two groups (Postman + Descript).** Descript was built through the
-  on-demand "+ Add competitor" flow, live — proof the create path works end to end and isn't
-  hardcoded to Postman. Descript also surfaced a genuinely useful case: its page lists monthly
-  *and* annual prices, so Bright Data's AI produced `price_monthly` / `price_annual` instead of
-  Postman's single `price`. Rather than special-case it, the monitor's price check now accepts
-  any of those shapes (see `monitor/schemaConfig.js` — a field can list several candidate
-  `paths`), which is the correct de-coupling from one site's exact key names. Descript still
-  reads **degraded** for two honest reasons the monitor correctly catches: its Enterprise tier
-  has no numeric price ("contact sales") and its Free tier's feature list didn't extract — a
-  real, non-staged heal candidate. Earlier attempts at Linear, Retool, and Resend failed during
-  AI generation; see `TARGETS.md`.
+- **Collectors built on demand, live, more than once.** Descript and Insomnia were both built
+  through the real "+ Add competitor" flow (not seeded), proving the create path isn't hardcoded
+  to Postman. Descript's page lists monthly *and* annual prices, so Bright Data's AI produced
+  `price_monthly` / `price_annual` instead of Postman's single `price`; Insomnia's scraper
+  returned price as a plain numeric *string* under a third field name (`price_value`). Rather
+  than special-case either, the monitor's price check accepts several candidate `paths` and
+  coerces unambiguous numeric strings (see `monitor/schemaConfig.js` / `monitor/evaluateRun.js`)
+  — the correct de-coupling from any one site's exact key names or types. Descript was later
+  deleted while testing the delete feature (see the delete confirm-dialog copy above for exactly
+  what that does) — it's reproducible any time via the same on-demand flow. Earlier attempts at
+  Linear, Retool, and Resend failed during AI generation; see `TARGETS.md`.
+- **AI-written diagnoses can catch gaps the rules don't know about.** Live-tested on Descript: an
+  earlier heal had already added a `price_text` field capturing "Custom" for its Enterprise tier
+  — genuinely fixed — but the rule schema didn't know `price_text` counts as a valid price
+  representation, so it kept flagging Enterprise as broken. Gemini, given the raw record directly,
+  noticed `price_text: "Custom"` was already there and said so. `price_text` isn't yet added to
+  the schema's accepted price paths — a good next fix, deliberately left alone here to keep this
+  note honest about what's actually been done vs. observed.
 - **`bdata scraper run <id> <url>` appears to ignore the URL argument.** Tested against three
   increasingly-mutated staged pages and even `https://example.com` — identical output every
   time, matching whatever the collector returned when first created. Bright Data's own docs

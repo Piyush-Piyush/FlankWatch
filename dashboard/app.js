@@ -6,7 +6,9 @@ const topbarMeta = document.getElementById("topbar-meta");
 const digestSection = document.getElementById("digest-section");
 const digestPanel = document.getElementById("digest-panel");
 const statRow = document.getElementById("stat-row");
-const categoryOptions = document.getElementById("category-options");
+const categorySelect = document.getElementById("category-select");
+const categoryNewField = document.getElementById("category-new-field");
+const categoryNewInput = document.getElementById("category-new-input");
 
 const addToggle = document.getElementById("add-toggle");
 const addFormWrap = document.getElementById("add-form-wrap");
@@ -211,7 +213,10 @@ function competitorCard(competitor) {
           <span class="card-title">${escapeHtml(name)}</span>
           <span class="card-url">${escapeHtml(url)}</span>
         </div>
-        ${statusPill(competitor)}
+        <div class="card-header-actions">
+          ${statusPill(competitor)}
+          <button class="icon-btn-delete" data-action="delete" data-name="${escapeHtml(name)}" ${busy ? "disabled" : ""} title="Stop tracking ${escapeHtml(name)}" aria-label="Stop tracking ${escapeHtml(name)}">×</button>
+        </div>
       </div>
 
       ${pricingTable(latestRun)}
@@ -359,9 +364,18 @@ async function refresh() {
         .join("");
     }
 
-    // Feed existing categories into the add-form's datalist for quick reuse.
-    const categories = [...new Set(competitors.map((c) => c.category).filter(Boolean))].sort();
-    categoryOptions.innerHTML = categories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join("");
+    // Feed existing groups into the add-form's dropdown for reuse. Preserve
+    // whatever the user currently has selected — refresh() runs every few
+    // seconds and would otherwise reset their choice mid-pick.
+    const categories = [...new Set([...competitors, ...pending].map((c) => c.category).filter(Boolean))].sort();
+    const previousSelection = categorySelect.value;
+    categorySelect.innerHTML =
+      `<option value="" disabled ${previousSelection ? "" : "selected"}>Select a group…</option>` +
+      categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("") +
+      `<option value="__new__">+ New group…</option>`;
+    if (categories.includes(previousSelection) || previousSelection === "__new__") {
+      categorySelect.value = previousSelection;
+    }
 
     if (digest.length > 0) {
       digestSection.hidden = false;
@@ -386,6 +400,23 @@ groupsEl.addEventListener("click", async (e) => {
   if (action === "dismiss-pending") {
     await fetchJson(`/api/collectors/pending/${id}`, { method: "DELETE" }).catch((err) => console.error("dismiss failed:", err));
     refresh();
+    return;
+  }
+
+  if (action === "delete") {
+    if (!confirm(`Stop tracking "${name}"? This deletes its run and heal history from FlankWatch. (The Bright Data collector itself isn't affected — Bright Data doesn't support deleting it via the API.)`)) {
+      return;
+    }
+    inFlight.add(name);
+    refresh();
+    try {
+      await fetchJson(`/api/competitors/${encodeURIComponent(name)}`, { method: "DELETE" });
+    } catch (err) {
+      alert(`Couldn't delete "${name}": ${err.message}`);
+    } finally {
+      inFlight.delete(name);
+      refresh();
+    }
     return;
   }
 
@@ -439,6 +470,8 @@ groupsEl.addEventListener("change", async (e) => {
 
 function toggleAddForm(show) {
   addFormWrap.hidden = !show;
+  categoryNewField.hidden = true;
+  categoryNewInput.required = false;
   if (show) addForm.querySelector('input[name="name"]').focus();
 }
 
@@ -448,8 +481,21 @@ addCancel.addEventListener("click", () => {
   toggleAddForm(false);
 });
 
+categorySelect.addEventListener("change", () => {
+  const isNew = categorySelect.value === "__new__";
+  categoryNewField.hidden = !isNew;
+  categoryNewInput.required = isNew;
+  if (isNew) categoryNewInput.focus();
+});
+
 addForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  const category = categorySelect.value === "__new__" ? categoryNewInput.value.trim() : categorySelect.value;
+  if (!category) {
+    alert("Pick a group, or type a name for the new one.");
+    return;
+  }
+
   const data = Object.fromEntries(new FormData(addForm));
   addSubmit.disabled = true;
   addSubmit.textContent = "Starting…";
@@ -457,7 +503,7 @@ addForm.addEventListener("submit", async (e) => {
     await fetchJson("/api/collectors", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: data.name, url: data.url, category: data.category }),
+      body: JSON.stringify({ name: data.name, url: data.url, category }),
     });
     addForm.reset();
     toggleAddForm(false);

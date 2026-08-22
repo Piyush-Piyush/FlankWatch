@@ -26,7 +26,7 @@
         <div class="add-form-row">
           <label class="field">
             <span class="field-label">Competitor name</span>
-            <input type="text" name="name" placeholder="e.g. Adobe Premiere" required />
+            <input type="text" name="name" placeholder="e.g. Postman" required />
           </label>
           <label class="field">
             <span class="field-label">Pricing page URL</span>
@@ -34,8 +34,14 @@
           </label>
           <label class="field">
             <span class="field-label">Group / segment</span>
-            <input type="text" name="category" list="category-options" placeholder="e.g. Video editing" required />
-            <datalist id="category-options"></datalist>
+            <select name="categorySelect" id="category-select" required>
+              <option value="" disabled selected>Select a group…</option>
+              <option value="__new__">+ New group…</option>
+            </select>
+          </label>
+          <label class="field" id="category-new-field" hidden>
+            <span class="field-label">New group name</span>
+            <input type="text" name="categoryNew" id="category-new-input" placeholder="e.g. Video editing" />
           </label>
         </div>
         <div class="add-form-footer">

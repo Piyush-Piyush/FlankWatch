@@ -23,6 +23,17 @@ export function getRecentHeals(limit = 50) {
   return db.prepare("SELECT * FROM heals ORDER BY triggered_at DESC LIMIT ?").all(limit);
 }
 
+/**
+ * Wipes a competitor's history (runs, heals, any pending build record) when
+ * it's removed from tracking — otherwise deleted competitors keep showing
+ * up in the heal log / stats with no way to reach them from the UI.
+ */
+export function deleteCompetitorData(competitor) {
+  db.prepare("DELETE FROM runs WHERE competitor = ?").run(competitor);
+  db.prepare("DELETE FROM heals WHERE competitor = ?").run(competitor);
+  db.prepare("DELETE FROM pending_collectors WHERE name = ?").run(competitor);
+}
+
 export function getResilienceStats(competitor) {
   const totals = db
     .prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status='healthy' THEN 1 ELSE 0 END) as healthy FROM runs WHERE competitor = ?")

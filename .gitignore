@@ -1,0 +1,9 @@
+node_modules/
+.env
+api/db/*.db
+api/db/*.db-journal
+api/db/*.db-wal
+api/db/*.db-shm
+scratch/
+dashboard/staged/
+flankwatch-build-roadmap.md

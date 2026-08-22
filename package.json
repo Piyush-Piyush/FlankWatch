@@ -1,0 +1,25 @@
+{
+  "name": "flankwatch",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "api/server.js",
+  "scripts": {
+    "start": "node api/server.js",
+    "test": "node --test monitor/evaluateRun.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Self-healing competitor pricing monitor built on Bright Data Scraper Studio.",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
+    "better-sqlite3": "^13.0.3",
+    "cheerio": "^1.2.0",
+    "cross-spawn": "^7.0.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

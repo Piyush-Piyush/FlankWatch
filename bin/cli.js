@@ -4,6 +4,7 @@ import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 
 import { setupCommand } from "./commands/setup.js";
+import { setGeminiKeyCommand } from "./commands/setGeminiKey.js";
 import { listCommand } from "./commands/list.js";
 import { addCommand } from "./commands/add.js";
 import { deleteCommand } from "./commands/delete.js";
@@ -24,6 +25,11 @@ program
   .alias("login")
   .description("Log in to Bright Data and optionally set a Gemini API key")
   .action(setupCommand);
+
+program
+  .command("set-gemini-key [key]")
+  .description("Set (or overwrite) the Gemini API key in .env, without redoing bdata login")
+  .action(setGeminiKeyCommand);
 
 program
   .command("list")

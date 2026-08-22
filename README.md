@@ -73,18 +73,20 @@ buzzword copy) in favor of a warm, minimal, data-dense layout.
 
 ```bash
 npm install
-node bin/cli.js setup   # bdata login (your own token, never stored in this repo) +
-                         # an optional Gemini key prompt, written straight to a local .env
-npm start                # http://localhost:3000
+npm link                 # registers `flank` / `flankwatch` globally (points at bin/cli.js)
+flank setup               # bdata login (your own token, never stored in this repo) +
+                           # an optional Gemini key prompt, written straight to a local .env
+npm start                 # http://localhost:3000
 ```
 
-`flankwatch setup` replaces the old "copy `.env.example` to `.env` and hand-edit it" step — the
-Gemini key is fully optional and skippable (leave it blank and the app runs pure rule-based, same
-as always). `npm link` first if you want the bare `flankwatch` command instead of `node bin/cli.js`.
+`flank setup` replaces the old "copy `.env.example` to `.env` and hand-edit it" step — the Gemini
+key is fully optional and skippable (leave it blank and the app runs pure rule-based, same as
+always). Skip `npm link` and use `node bin/cli.js <command>` (or `npm run cli -- <command>`)
+instead if you'd rather not link it globally.
 
 Requires Node ≥ 22.13 (the `bdata` CLI's dependencies reject older versions).
 
-## Terminal-first: the `flankwatch` CLI
+## Terminal-first: the `flank` CLI
 
 Every action the dashboard can do also exists as a terminal command, calling the exact same
 `api/services/*.js` functions the dashboard's HTTP routes call — no duplicated logic, two
@@ -93,22 +95,25 @@ but the CLI is what proves this isn't just a web app that happens to touch Brigh
 drive the whole `create → run → heal → approve` loop without opening a browser:
 
 ```bash
-node bin/cli.js setup                                        # bdata login + optional Gemini key
-node bin/cli.js list [--json]                                 # competitors, pending builds, schedules
-node bin/cli.js add <name> <url> [-c category] [-d desc]       # build a new scraper on demand
-node bin/cli.js delete <name> [-y]                             # stop tracking + wipe history
-node bin/cli.js run <name> [-u url] [--no-heal]                # trigger a run; auto-heals if degraded
-node bin/cli.js heal <name> [--diagnosis "..."]                # manual heal (auto-diagnoses if omitted)
-node bin/cli.js approve <name> [--reject]                      # approve/reject the pending heal
-node bin/cli.js dismiss-heal <name>                            # clear a stuck needs_review heal
-node bin/cli.js dismiss-build <id>                             # clear a failed pending build
-node bin/cli.js schedule <category> [cron] [--clear]           # set/clear a group's cron schedule
-node bin/cli.js dashboard [--no-open] [--port n]                # start the server, open the browser
+flank setup                                        # bdata login + optional Gemini key
+flank set-gemini-key [key]                          # reset the Gemini key alone, overwrites in place
+flank list [--json]                                 # competitors, pending builds, schedules
+flank add <name> <url> [-c category] [-d desc]       # build a new scraper on demand
+flank delete <name> [-y]                             # stop tracking + wipe history
+flank run <name> [-u url] [--no-heal]                # trigger a run; auto-heals if degraded
+flank heal <name> [--diagnosis "..."]                # manual heal (auto-diagnoses if omitted)
+flank approve <name> [--reject]                      # approve/reject the pending heal
+flank dismiss-heal <name>                            # clear a stuck needs_review heal
+flank dismiss-build <id>                             # clear a failed pending build
+flank schedule <category> [cron] [--clear]           # set/clear a group's cron schedule
+flank dashboard [--no-open] [--port n]                # start the server, open the browser
 ```
 
-`schedule` only persists `collectors/schedules.json` — the cron itself only runs inside a live
-process, so it takes effect the next time `dashboard`/`npm start` boots. Every other command runs
-and exits, same as any CLI tool.
+(`node bin/cli.js <command>` works identically without `npm link`.) `schedule` only persists
+`collectors/schedules.json` — the cron itself only runs inside a live process, so it takes effect
+the next time `dashboard`/`npm start` boots. Every other command runs and exits, same as any CLI
+tool. `set-gemini-key` prompts interactively if you omit `[key]` — safer than typing it as a plain
+argument, which lands in shell history.
 
 ## The AI toggle
 

@@ -4,6 +4,7 @@
   "type": "module",
   "main": "api/server.js",
   "bin": {
+    "flank": "bin/cli.js",
     "flankwatch": "bin/cli.js"
   },
   "scripts": {

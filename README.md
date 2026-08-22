@@ -73,12 +73,42 @@ buzzword copy) in favor of a warm, minimal, data-dense layout.
 
 ```bash
 npm install
-npx -p @brightdata/cli bdata login   # opens a browser, stores credentials in the CLI's own config
-cp .env.example .env                 # optional: set AI_ENABLED=true + GEMINI_API_KEY for the AI toggle
-npm start                            # http://localhost:3000
+node bin/cli.js setup   # bdata login (your own token, never stored in this repo) +
+                         # an optional Gemini key prompt, written straight to a local .env
+npm start                # http://localhost:3000
 ```
 
+`flankwatch setup` replaces the old "copy `.env.example` to `.env` and hand-edit it" step — the
+Gemini key is fully optional and skippable (leave it blank and the app runs pure rule-based, same
+as always). `npm link` first if you want the bare `flankwatch` command instead of `node bin/cli.js`.
+
 Requires Node ≥ 22.13 (the `bdata` CLI's dependencies reject older versions).
+
+## Terminal-first: the `flankwatch` CLI
+
+Every action the dashboard can do also exists as a terminal command, calling the exact same
+`api/services/*.js` functions the dashboard's HTTP routes call — no duplicated logic, two
+interfaces on one service layer. The dashboard isn't going anywhere (it stays fully interactive),
+but the CLI is what proves this isn't just a web app that happens to touch Bright Data — you can
+drive the whole `create → run → heal → approve` loop without opening a browser:
+
+```bash
+node bin/cli.js setup                                        # bdata login + optional Gemini key
+node bin/cli.js list [--json]                                 # competitors, pending builds, schedules
+node bin/cli.js add <name> <url> [-c category] [-d desc]       # build a new scraper on demand
+node bin/cli.js delete <name> [-y]                             # stop tracking + wipe history
+node bin/cli.js run <name> [-u url] [--no-heal]                # trigger a run; auto-heals if degraded
+node bin/cli.js heal <name> [--diagnosis "..."]                # manual heal (auto-diagnoses if omitted)
+node bin/cli.js approve <name> [--reject]                      # approve/reject the pending heal
+node bin/cli.js dismiss-heal <name>                            # clear a stuck needs_review heal
+node bin/cli.js dismiss-build <id>                             # clear a failed pending build
+node bin/cli.js schedule <category> [cron] [--clear]           # set/clear a group's cron schedule
+node bin/cli.js dashboard [--no-open] [--port n]                # start the server, open the browser
+```
+
+`schedule` only persists `collectors/schedules.json` — the cron itself only runs inside a live
+process, so it takes effect the next time `dashboard`/`npm start` boots. Every other command runs
+and exits, same as any CLI tool.
 
 ## The AI toggle
 
@@ -172,6 +202,15 @@ A few things worth knowing if picking this back up:
   noticed `price_text: "Custom"` was already there and said so. `price_text` isn't yet added to
   the schema's accepted price paths — a good next fix, deliberately left alone here to keep this
   note honest about what's actually been done vs. observed.
+- **Bright Data appears to serialize heal/create jobs per account, not per collector.** While
+  live-testing the CLI, a heal attempt on one collector and a `create` on a completely unrelated
+  one both hit `Error: Another refactor job is still in progress (Status: 409)` back to back —
+  seen across different collector IDs, so it reads as an account-wide queue rather than a
+  per-scraper lock. `autoHealAndApprove()`'s retry cap treats this the same as any other failed
+  heal (counts toward the 3-attempt budget, lands in `needs_review`), which is the right behavior
+  regardless of cause. Also observed: `bdata scraper create` failing AI generation outright for
+  `cal.com/pricing` (`status: undefined`, no explanation) — added to the same failure bucket as
+  Linear/Retool/Resend in `TARGETS.md`, not every public pricing page is generatable.
 - **`bdata scraper run <id> <url>` appears to ignore the URL argument.** Tested against three
   increasingly-mutated staged pages and even `https://example.com` — identical output every
   time, matching whatever the collector returned when first created. Bright Data's own docs

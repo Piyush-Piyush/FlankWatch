@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runRuleChecks } from "./evaluateRun.js";
+import { runRuleChecks, generateDiagnosis } from "./evaluateRun.js";
 import { PRICING_SCHEMA } from "./schemaConfig.js";
 
 const goodRun = [
@@ -65,22 +65,78 @@ test("null price is flagged", () => {
   assert.ok(reasons.some((r) => r.includes("price")));
 });
 
-test("a $0 price on a non-Free tier is flagged as suspicious", () => {
+test("a $0 price appearing AFTER a paid tier is flagged as suspicious", () => {
   // Empirically observed: a heal can "fix" a missing price into a
-  // technically-valid-but-wrong $0 (e.g. Enterprise). $0 must still pass
-  // the plain numeric check — this is a distinct, additional check.
+  // technically-valid-but-wrong $0 (e.g. Enterprise, positioned after paid
+  // tiers). Positional, not name-based — real free tiers are named all
+  // sorts of things ("Essentials", "Starter"), so guessing off the name
+  // is unreliable, but a $0 appearing after an already-paid tier isn't.
   const suspicious = [
-    { pricing_tiers: [{ plan_name: "Enterprise", price: { value: 0 }, features: ["a"] }] },
+    {
+      pricing_tiers: [
+        { plan_name: "Solo", price: { value: 9 }, features: ["a"] },
+        { plan_name: "Enterprise", price: { value: 0 }, features: ["a"] },
+      ],
+    },
   ];
   const { status, reasons } = runRuleChecks(suspicious, null, PRICING_SCHEMA);
   assert.equal(status, "degraded");
   assert.ok(reasons.some((r) => r.includes("$0") && r.includes("Enterprise")));
 });
 
-test("a $0 price on a Free tier is NOT flagged", () => {
-  const fine = [{ pricing_tiers: [{ plan_name: "Free", price: { value: 0 }, features: ["a"] }] }];
-  const { status } = runRuleChecks(fine, null, PRICING_SCHEMA);
-  assert.equal(status, "healthy");
+test("a $0 price on the first tier (typical free tier) is NOT flagged, whatever it's named", () => {
+  // Mirrors a real case: Insomnia's actual free tier is named "Essentials",
+  // not "Free" — name-guessing would get this wrong.
+  const fine = [
+    {
+      pricing_tiers: [
+        { plan_name: "Essentials", price: { value: 0 }, features: ["a"] },
+        { plan_name: "Pro", price: { value: 12 }, features: ["a"] },
+      ],
+    },
+  ];
+  const { status, reasons } = runRuleChecks(fine, null, PRICING_SCHEMA);
+  assert.equal(status, "healthy", reasons.join("; "));
+});
+
+test("numeric-string prices are coerced and accepted (different site, string shape)", () => {
+  // Insomnia's scraper returned price_value as a string ("0", "12", "45"),
+  // not a number under price.value. Real numeric strings should coerce;
+  // non-numeric text like "Contact us" must NOT.
+  const stringPrices = [
+    { pricing_tiers: [{ plan_name: "Essentials", price_value: "0", features: ["a"] }, { plan_name: "Pro", price_value: "12", features: ["a"] }] },
+  ];
+  const { status, reasons } = runRuleChecks(stringPrices, null, PRICING_SCHEMA);
+  assert.equal(status, "healthy", reasons.join("; "));
+});
+
+test("non-numeric price text is still a failure, not silently coerced", () => {
+  const textPrice = [{ pricing_tiers: [{ plan_name: "Enterprise", price_value: "Contact us", features: ["a"] }] }];
+  const { status, reasons } = runRuleChecks(textPrice, null, PRICING_SCHEMA);
+  assert.equal(status, "degraded");
+  assert.ok(reasons.some((r) => r.includes("Enterprise") && r.includes("no numeric price")));
+});
+
+test("missing price across many tiers groups into one sentence, staying under the heal CLI's 1000-char limit", () => {
+  // A page with several tiers all missing a price used to repeat a full
+  // paragraph per tier and blow past bdata scraper heal's 1000-char cap,
+  // landing the collector in needs_review before ever reaching Bright Data.
+  const manyBroken = [
+    {
+      pricing_tiers: [
+        { plan_name: "Essentials", features: ["a"] },
+        { plan_name: "Pro 15% savings", features: ["a"] },
+        { plan_name: "Enterprise", features: ["a"] },
+        { plan_name: "Team", features: ["a"] },
+        { plan_name: "Business", features: ["a"] },
+      ],
+    },
+  ];
+  const { status, reasons } = runRuleChecks(manyBroken, null, PRICING_SCHEMA);
+  assert.equal(status, "degraded");
+  const diagnosis = generateDiagnosis(reasons);
+  assert.ok(diagnosis.length <= 1000, `diagnosis was ${diagnosis.length} chars`);
+  assert.ok(diagnosis.includes("Essentials") && diagnosis.includes("Enterprise"));
 });
 
 test("empty feature list is flagged", () => {

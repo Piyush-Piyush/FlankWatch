@@ -583,7 +583,8 @@ body {
 .heal-log-status.status-approving,
 .heal-log-status.status-rejecting { background: rgba(201, 133, 0, 0.25); color: #f0c069; }
 .heal-log-status.status-needs_review { background: rgba(107, 90, 168, 0.28); color: #c3b6ef; }
-.heal-log-status.status-rejected { background: rgba(255, 255, 255, 0.08); color: #b9b2a3; }
+.heal-log-status.status-rejected,
+.heal-log-status.status-dismissed { background: rgba(255, 255, 255, 0.08); color: #b9b2a3; }
 
 .heal-log-diagnosis { color: #b9b2a3; white-space: pre-wrap; }
 

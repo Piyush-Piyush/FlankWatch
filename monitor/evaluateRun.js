@@ -16,6 +16,16 @@ function getFieldValue(record, fieldSpec) {
   return undefined;
 }
 
+// Different scrapers return numbers as actual numbers or as numeric
+// strings ("12", "0") depending on the site. Coerce only unambiguous
+// numeric strings — never coerce non-numeric text like "Contact us" or
+// "Custom", which must stay a failure so it gets caught and healed.
+function toNumberIfNumeric(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim())) return Number(value);
+  return value;
+}
+
 function unwrap(result) {
   return Array.isArray(result) ? result[0] : result;
 }
@@ -51,52 +61,80 @@ export function runRuleChecks(current, lastKnownGood, schema) {
   // capture, not a JSON-validation complaint. Vague reasons ("not a valid
   // number") produce heals that change nothing, since there's no concrete
   // page-content hint to act on.
+  //
+  // Per-field failures that can repeat across many tiers (missing price,
+  // suspicious $0) are collected here and rendered as ONE grouped sentence
+  // naming every affected tier, instead of repeating a full paragraph per
+  // tier — a page with 4 tiers all missing a price used to produce a
+  // diagnosis over 1000 chars, which the heal CLI rejects outright before
+  // ever reaching Bright Data.
+  const missingPriceTiers = [];
+  const zeroPriceTiers = [];
+  let sawNonZeroPrice = false;
+
   records.forEach((record, idx) => {
-    const label = record.plan_name ? `"${record.plan_name}" tier` : `tier ${idx}`;
+    const label = record.plan_name ? `"${record.plan_name}"` : `tier ${idx}`;
 
     for (const [fieldName, fieldSpec] of Object.entries(schema.fields)) {
-      const value = getFieldValue(record, fieldSpec);
+      const rawValue = getFieldValue(record, fieldSpec);
+      const value = fieldSpec.type === "number" ? toNumberIfNumeric(rawValue) : rawValue;
 
       if (fieldSpec.type === "number") {
         const isPriceField = fieldName.toLowerCase().includes("price");
+        const isValid = typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        if (!isValid) {
           if (isPriceField) {
-            reasons.push(
-              `The ${label} has no numeric price. If this tier displays non-numeric pricing text instead of a dollar amount ` +
-                `(e.g. "Contact us", "Custom", "Talk to sales"), capture that text in a dedicated field (e.g. price_text) rather ` +
-                `than leaving the tier without a price. Otherwise, the price element's location or markup for this tier may have changed.`
-            );
+            missingPriceTiers.push(label);
           } else {
-            reasons.push(`The ${label}'s "${fieldName}" field did not parse as a number (got ${JSON.stringify(value)}) — its markup or position on the page may have changed.`);
+            reasons.push(`The ${label} tier's "${fieldName}" field did not parse as a number (got ${JSON.stringify(rawValue)}) — its markup or position on the page may have changed.`);
           }
-        } else if (isPriceField && value === 0 && !/free|trial/i.test(record.plan_name || "")) {
-          // A $0 price technically satisfies "is it a number", but $0 on a
-          // tier not named Free/Trial is almost always a mis-extraction
-          // (commonly the price element was misread as empty and defaulted
-          // to 0), not a real price. Caught this empirically: a heal on
-          // Descript's Enterprise tier "fixed" a missing price into a $0
-          // that passed validation but was clearly wrong.
-          reasons.push(
-            `The ${label} shows a $0 price, which is unusual for a tier not named "Free" — this likely means the price wasn't ` +
-              `really found and defaulted to zero. If this tier uses custom/contact pricing, capture that as text instead of $0.`
-          );
+        } else if (isPriceField) {
+          if (value === 0 && sawNonZeroPrice) {
+            // A $0 price technically satisfies "is it a number", but a tier
+            // priced at $0 *after* other tiers already showed a real price
+            // is almost always a mis-extraction (the real value wasn't
+            // found and defaulted to zero) — pricing pages are conventionally
+            // ordered cheapest-first, so a free tier belongs at the start,
+            // not appearing after paid ones. Positional, not name-based:
+            // empirically, real free tiers are named all sorts of things
+            // ("Essentials", "Starter", "Community"), so guessing off the
+            // name is unreliable — but seeing $0 *after* a paid tier isn't.
+            zeroPriceTiers.push(label);
+          } else if (value > 0) {
+            sawNonZeroPrice = true;
+          }
         }
       } else if (fieldSpec.type === "string") {
         if (fieldSpec.required && (typeof value !== "string" || value.trim() === "")) {
-          reasons.push(`The ${label} is missing its required "${fieldName}" — check whether this field moved to a different element or attribute for this tier.`);
+          reasons.push(`The ${label} tier is missing its required "${fieldName}" — check whether this field moved to a different element or attribute for this tier.`);
         }
       } else if (fieldSpec.type === "list") {
         const minItems = fieldSpec.minItems || 0;
         if (!Array.isArray(value) || value.length < minItems) {
           reasons.push(
-            `The ${label} has no "${fieldName}" items (expected at least ${minItems}). Check whether this tier's list markup differs from ` +
+            `The ${label} tier has no "${fieldName}" items (expected at least ${minItems}). Check whether this tier's list markup differs from ` +
               `the other tiers — e.g. nested differently, hidden behind a toggle, or a different HTML structure.`
           );
         }
       }
     }
   });
+
+  if (missingPriceTiers.length > 0) {
+    reasons.push(
+      `These tiers have no numeric price: ${missingPriceTiers.join(", ")}. If any of them displays non-numeric pricing text instead of a ` +
+        `dollar amount (e.g. "Contact us", "Custom", "Talk to sales"), capture that text in a dedicated field (e.g. price_text) for that ` +
+        `tier rather than leaving it without a price. Otherwise, the price element's location or markup may have changed for these tiers.`
+    );
+  }
+  if (zeroPriceTiers.length > 0) {
+    reasons.push(
+      `These tiers show a $0 price after another tier already showed a real price: ${zeroPriceTiers.join(", ")}. Pricing pages are usually ` +
+        `ordered cheapest-first, so a $0 value appearing after a paid tier likely means the real price wasn't found and defaulted to zero. ` +
+        `If any of these use custom/contact pricing, capture that as text instead of $0.`
+    );
+  }
 
   if (lastGoodRecords && lastGoodRecords.length > 0 && records.length > 0) {
     const currentKeys = new Set(Object.keys(records[0]));
@@ -110,11 +148,22 @@ export function runRuleChecks(current, lastKnownGood, schema) {
   return { status: reasons.length > 0 ? "degraded" : "healthy", reasons };
 }
 
+const HEAL_PROMPT_MAX_CHARS = 1000; // bdata scraper heal's own hard limit
+
 export function generateDiagnosis(reasons) {
   if (reasons.length === 0) return "";
   // Each reason is already a full, actionable sentence (see runRuleChecks) —
   // join as a short list rather than folding into one run-on clause.
-  return reasons.join(" ");
+  const full = reasons.join(" ");
+  if (full.length <= HEAL_PROMPT_MAX_CHARS) return full;
+
+  // Defensive cap: even with grouping, enough distinct issues could still
+  // exceed the CLI's limit. Truncating silently here (at a word boundary)
+  // beats the alternative we hit in practice — the heal call rejecting the
+  // whole diagnosis outright and landing the collector in needs_review
+  // with nothing sent to Bright Data at all.
+  const cut = full.slice(0, HEAL_PROMPT_MAX_CHARS - 3).replace(/\s+\S*$/, "");
+  return `${cut}...`;
 }
 
 /**

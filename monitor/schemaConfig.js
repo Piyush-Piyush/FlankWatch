@@ -15,7 +15,11 @@ export const PRICING_SCHEMA = {
   minRecordCountRatio: 0.5,
   fields: {
     plan_name: { path: "plan_name", type: "string", required: true },
-    price: { paths: ["price.value", "price_monthly.value", "price_annual.value", "price"], type: "number", required: true },
+    price: {
+      paths: ["price.value", "price_monthly.value", "price_annual.value", "price_value", "price"],
+      type: "number",
+      required: true,
+    },
     features: { path: "features", type: "list", minItems: 1 },
   },
 };

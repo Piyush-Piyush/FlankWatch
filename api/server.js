@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { runCollectorForCompetitor } from "./services/pipeline.js";
-import { insertPendingHeal, runHealJob, markHealPending, runApproveJob } from "./services/healService.js";
+import { insertPendingHeal, runHealJob, markHealPending, runApproveJob, dismissHeal } from "./services/healService.js";
 import { startCollectorCreation, runCreateJob, listPendingCollectors, dismissPending } from "./services/collectorService.js";
 import { getLatestRun, getPreviousHealthyRun, getOpenHeal, getRecentHeals, getResilienceStats } from "./db/queries.js";
 import { loadCollectors, loadSchedules, setSchedule } from "../lib/collectorStore.js";
@@ -135,6 +135,18 @@ app.post("/api/competitors/:name/approve", (req, res) => {
     runApproveJob(heal.id, competitor, { reject }).catch((err) => console.error(`approve job ${heal.id} failed:`, err));
   } catch (err) {
     res.status(500).json({ error: String(err.message ?? err) });
+  }
+});
+
+// Clears a stuck needs_review heal so the card stops blocking on it —
+// the row stays in the heal log (status "dismissed"), just no longer
+// counted as "open".
+app.post("/api/competitors/:name/dismiss-heal", (req, res) => {
+  try {
+    dismissHeal(req.params.name);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: String(err.message ?? err) });
   }
 });
 

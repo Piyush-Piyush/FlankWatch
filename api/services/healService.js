@@ -87,3 +87,18 @@ export async function approveHeal(competitor, { reject = false } = {}) {
   const row = db.prepare("SELECT * FROM heals WHERE id = ?").get(heal.id);
   return { healId: heal.id, status: row.status, error: row.error };
 }
+
+/**
+ * Clears a stuck needs_review heal so the competitor's card stops
+ * blocking on it. Keeps the row (status "dismissed") for the heal log's
+ * history instead of deleting it — only needs_review can be dismissed;
+ * an in-flight heal must resolve on its own first.
+ */
+export function dismissHeal(competitor) {
+  const heal = getMostRecentHeal(competitor);
+  if (!heal || heal.status !== "needs_review") {
+    throw new Error(`No needs_review heal to dismiss for ${competitor} (current: ${heal?.status ?? "none"})`);
+  }
+  db.prepare("UPDATE heals SET status = 'dismissed' WHERE id = ?").run(heal.id);
+  return heal;
+}

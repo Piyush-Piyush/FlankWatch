@@ -28,12 +28,14 @@ const SCHEDULE_PRESETS = [
 function money(obj) {
   if (obj && typeof obj.value === "number") return `${obj.symbol || "$"}${obj.value}`;
   if (typeof obj === "number") return `$${obj}`;
+  if (typeof obj === "string" && /^-?\d+(\.\d+)?$/.test(obj.trim())) return `$${obj.trim()}`;
   return null;
 }
 
 // Mirrors the monitor's any-of price handling: different sites structure
-// price as a single value or a monthly/annual split. Show whatever's there
-// (monthly preferred), with a "/yr" hint when only annual exists.
+// price under different keys and shapes (an object, a plain number, or a
+// numeric string). Show whatever's there (monthly preferred), with a
+// "/yr" hint when only annual exists.
 function formatMoney(tier) {
   const single = money(tier.price);
   if (single) return single;
@@ -41,6 +43,8 @@ function formatMoney(tier) {
   if (monthly) return `${monthly}/mo`;
   const annual = money(tier.price_annual);
   if (annual) return `${annual}/yr`;
+  const plain = money(tier.price_value);
+  if (plain) return plain;
   return "—";
 }
 
@@ -145,6 +149,12 @@ function healBanner(competitor) {
       <div class="heal-banner-actions">
         <button class="btn btn-primary" data-action="approve" data-name="${escapeHtml(name)}" ${busy ? "disabled" : ""}>Approve</button>
         <button class="btn btn-reject" data-action="reject" data-name="${escapeHtml(name)}" ${busy ? "disabled" : ""}>Reject</button>
+      </div>`;
+  } else if (openHeal.status === "needs_review") {
+    actions = `
+      <div class="heal-banner-actions">
+        <button class="btn btn-primary" data-action="heal" data-name="${escapeHtml(name)}" ${busy ? "disabled" : ""}>Retry heal</button>
+        <button class="btn btn-ghost" data-action="dismiss-heal" data-name="${escapeHtml(name)}" ${busy ? "disabled" : ""}>Dismiss</button>
       </div>`;
   }
 
@@ -395,6 +405,8 @@ groupsEl.addEventListener("click", async (e) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reject: true }),
       });
+    } else if (action === "dismiss-heal") {
+      await fetchJson(`/api/competitors/${encodeURIComponent(name)}/dismiss-heal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     }
   } catch (err) {
     console.error(`${action} failed:`, err);

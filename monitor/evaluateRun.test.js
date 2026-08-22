@@ -44,14 +44,14 @@ test("empty tiers with no last-known-good is flagged", () => {
   const broken = [{ pricing_tiers: [] }];
   const { status, reasons } = runRuleChecks(broken, null, PRICING_SCHEMA);
   assert.equal(status, "degraded");
-  assert.ok(reasons.some((r) => r.includes("No records extracted")));
+  assert.ok(reasons.some((r) => r.includes("No pricing tiers were extracted")));
 });
 
 test("tier count drop vs last-known-good is flagged", () => {
   const broken = [{ pricing_tiers: [goodRun[0].pricing_tiers[0]] }];
   const { status, reasons } = runRuleChecks(broken, goodRun, PRICING_SCHEMA);
   assert.equal(status, "degraded");
-  assert.ok(reasons.some((r) => r.includes("Expected ~4 records, got 1")));
+  assert.ok(reasons.some((r) => r.includes("Expected ~4 pricing tiers, got 1")));
 });
 
 test("null price is flagged", () => {
@@ -63,6 +63,24 @@ test("null price is flagged", () => {
   const { status, reasons } = runRuleChecks(broken, null, PRICING_SCHEMA);
   assert.equal(status, "degraded");
   assert.ok(reasons.some((r) => r.includes("price")));
+});
+
+test("a $0 price on a non-Free tier is flagged as suspicious", () => {
+  // Empirically observed: a heal can "fix" a missing price into a
+  // technically-valid-but-wrong $0 (e.g. Enterprise). $0 must still pass
+  // the plain numeric check — this is a distinct, additional check.
+  const suspicious = [
+    { pricing_tiers: [{ plan_name: "Enterprise", price: { value: 0 }, features: ["a"] }] },
+  ];
+  const { status, reasons } = runRuleChecks(suspicious, null, PRICING_SCHEMA);
+  assert.equal(status, "degraded");
+  assert.ok(reasons.some((r) => r.includes("$0") && r.includes("Enterprise")));
+});
+
+test("a $0 price on a Free tier is NOT flagged", () => {
+  const fine = [{ pricing_tiers: [{ plan_name: "Free", price: { value: 0 }, features: ["a"] }] }];
+  const { status } = runRuleChecks(fine, null, PRICING_SCHEMA);
+  assert.equal(status, "healthy");
 });
 
 test("empty feature list is flagged", () => {

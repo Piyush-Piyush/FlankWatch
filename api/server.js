@@ -11,6 +11,7 @@ import { loadCollectors, loadSchedules, setSchedule } from "../lib/collectorStor
 import { reloadSchedules } from "./scheduler.js";
 import { diffPricingRuns } from "../lib/diffPricing.js";
 import { generateDigest } from "../lib/digest.js";
+import { generateDiagnosis } from "../monitor/evaluateRun.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_DIR = path.join(__dirname, "..", "dashboard");
@@ -111,7 +112,7 @@ app.post("/api/competitors/:name/heal", (req, res) => {
     const competitor = req.params.name;
     const latestRun = getLatestRun(competitor);
     const reasons = latestRun ? JSON.parse(latestRun.reasons || "[]") : [];
-    const diagnosis = req.body?.diagnosis || (reasons.length > 0 ? `Scrape output failed sanity checks: ${reasons.join("; ")}.` : null);
+    const diagnosis = req.body?.diagnosis || generateDiagnosis(reasons) || null;
     if (!diagnosis) {
       res.status(400).json({ error: "diagnosis is required (no degraded reasons on file to auto-generate one)" });
       return;

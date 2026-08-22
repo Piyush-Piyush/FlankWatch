@@ -1,0 +1,8 @@
+{
+  "postman": {
+    "url": "https://www.getpostman.com/pricing",
+    "collector_id": "c_mt4mvrmkhsc3u8scr",
+    "description": "Extract ALL pricing tiers shown on the page (Free, Basic, Professional, Enterprise, etc — every plan card, not just one). For each tier: plan name, price value, currency, billing period (monthly/annual), full list of feature bullets.",
+    "status": "verified"
+  }
+}

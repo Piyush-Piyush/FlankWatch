@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlankWatch</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark">FlankWatch</span>
+        <span class="brand-sub">Self-healing competitor pricing monitor</span>
+      </div>
+      <div class="topbar-meta" id="topbar-meta"></div>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="digest-section" id="digest-section" hidden>
+      <h2 class="section-title">This week</h2>
+      <div class="digest-panel" id="digest-panel"></div>
+    </section>
+
+    <section class="competitor-grid" id="competitor-grid" aria-live="polite">
+      <p class="loading-note">Loading competitors…</p>
+    </section>
+
+    <section class="heal-log-section">
+      <h2 class="section-title">Heal log</h2>
+      <div class="heal-log-panel" id="heal-log-panel">
+        <p class="loading-note">Loading heal history…</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

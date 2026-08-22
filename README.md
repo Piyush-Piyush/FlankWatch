@@ -1,0 +1,97 @@
+# FlankWatch
+
+A competitor pricing monitor that **survives the website changing.** It scrapes competitor pricing pages via Bright Data Scraper Studio, detects when the extracted data looks wrong, diagnoses what likely broke, triggers Bright Data's AI self-healing, and shows a human the proposed fix before anything is approved — the whole `detect → diagnose → heal → preview → approve → verify` loop, visible on a live dashboard.
+
+Built for a hackathon judged on Best Use of Bright Data, Best UI, and Best Clean Code.
+
+## Architecture
+
+```
+/collectors        Scraper Studio CLI invocations ONLY — no orchestration, no storage.
+/heal-orchestrator  heal_collector() / approve_collector() — CLI invocations ONLY.
+/monitor            evaluate_run() — rule-based sanity checks + optional AI advisory pass.
+/lib                Shared logic used by the API layer: safe CLI spawning, pricing diff,
+                     weekly digest generation.
+/api
+  /db               SQLite schema + queries (runs, heals tables).
+  /services         Orchestration: trigger a collector run, store the result, evaluate it;
+                     trigger/approve a heal, verify recovery afterward.
+  server.js         Express app — REST API + serves /dashboard statically.
+/dashboard          Vanilla HTML/CSS/JS. No framework — full control over the visual design,
+                     zero build step.
+/scripts            Manual verification tools (see "Reproducing the demo" below).
+```
+
+**Why /collectors and /heal-orchestrator are separate from /api:** those two folders are
+strictly thin wrappers around the `bdata` CLI — nothing else lives there. That's the visible
+boundary between "genuinely uses Bright Data" and "our own engineering" (judge Q8). Everything
+that isn't a direct CLI call — storage, evaluation, the fire-and-forget job handling for
+multi-minute heal calls — lives in `/api/services`, not spread across the CLI-wrapper folders.
+
+**Why vanilla JS, not React:** no dashboard existed yet when Phase 5 started, so introducing a
+framework would have been pure overhead. Hand-written HTML/CSS gave full control over avoiding
+generic AI-generated-website patterns (gradients, glow, bento grids, floating 3D shapes,
+buzzword copy) in favor of a warm, minimal, data-dense layout.
+
+## Setup
+
+```bash
+npm install
+npx -p @brightdata/cli bdata login   # opens a browser, stores credentials in the CLI's own config
+cp .env.example .env                 # optional: set AI_ENABLED=true + ANTHROPIC_API_KEY for the AI toggle
+npm start                            # http://localhost:3000
+```
+
+Requires Node ≥ 22.13 (the `bdata` CLI's dependencies reject older versions).
+
+## The AI toggle
+
+`evaluate_run()` is rule-based and deterministic by default — it never depends on an external
+API being up. If `AI_ENABLED=true` and `ANTHROPIC_API_KEY` is set, a second advisory pass
+(Claude Opus 4.8, low effort) can *escalate* a `healthy` verdict to `degraded` if it spots
+something the rules missed. It can never downgrade a rule-flagged `degraded` back to `healthy`,
+and any failure of the AI call (bad key, network, rate limit) silently falls back to the rule
+verdict — the detection floor never depends on AI availability. The same toggle also gates the
+weekly digest's AI-written summary (falls back to a plain template sentence otherwise).
+
+## Reproducing the demo locally
+
+```bash
+node scripts/run-pipeline-manually.js      # trigger a real collector run, store + evaluate the result
+node scripts/run-heal-manually.js "<diagnosis text>"   # trigger a real heal, then approve it, then verify recovery
+```
+
+Both hit real Bright Data AI-Flow jobs — a `create`/`heal` call typically takes 5-10 minutes,
+a plain `run` a few seconds to a minute. Watch progress live at the `view_url` the CLI prints,
+or in the dashboard's heal log once the server is running.
+
+To verify the dashboard itself renders and behaves correctly (used during development, not
+required to run the app): `node scripts/screenshot.js http://localhost:3000 out.png` —
+launches headless Chromium, screenshots the page, and reports any console errors.
+
+## Honest status notes
+
+A few things worth knowing if picking this back up:
+
+- **1 verified collector (Postman), not 2-3.** Linear, Retool, and Resend were all attempted —
+  see `TARGETS.md` for exactly what happened. 3 of 4 non-Postman attempts failed during AI
+  generation itself, across unrelated sites, in the same session that had already run ~7 prior
+  generations — reads more like transient account/session load than per-site difficulty. Worth
+  retrying fresh rather than assuming those targets are permanently unworkable.
+- **`bdata scraper run <id> <url>` appears to ignore the URL argument.** Tested against three
+  increasingly-mutated staged pages and even `https://example.com` — identical output every
+  time, matching whatever the collector returned when first created. Bright Data's own docs
+  don't describe this as expected behavior. This affects the "detect when the site changes"
+  story: periodic `run` calls may not reflect the page's true current state. Worth filing with
+  Bright Data or digging into the raw REST API (`/dca/trigger` + `/dca/dataset`) as an
+  alternative to the CLI's `run` subcommand.
+- **Phase 8's staged-redesign approach was built but parked.** `scripts/build-staged-redesign.js`
+  mutates a real copy of Postman's HTML (moves price out of visible text) and serves it via
+  `dashboard/staged/`; a Cloudflare quick tunnel exposes it publicly so Bright Data's crawler can
+  reach it (`npx cloudflared tunnel --url http://localhost:3000`). It works mechanically, but
+  because the mutated page still carries all of Postman's real branding/meta/nav, Scraper
+  Studio's AI extraction seemed confident enough recognizing the page that it returned
+  plausible-but-stale values instead of reflecting the actual (broken) content — combined with
+  the `run`-ignores-URL finding above, this couldn't be fully verified as a true live break. The
+  demo plan instead relies on Phase 4's heal loop directly (already proven live, twice, with real
+  field additions) rather than a detected-live-break narrative.

@@ -6,6 +6,15 @@ function row(cols, widths) {
   return cols.map((c, i) => String(c ?? "").padEnd(widths[i])).join("  ");
 }
 
+const MAX_PENDING_ERROR_CHARS = 150;
+
+/** bdata create/heal failures embed the full CLI transcript in .error — collapse to one short line for the table. */
+function summarizeError(error) {
+  if (!error) return "";
+  const oneLine = error.replace(/\s+/g, " ").trim();
+  return oneLine.length > MAX_PENDING_ERROR_CHARS ? `${oneLine.slice(0, MAX_PENDING_ERROR_CHARS - 3)}...` : oneLine;
+}
+
 export function listCommand(options) {
   const collectors = loadCollectors();
   const schedules = loadSchedules();
@@ -44,8 +53,10 @@ export function listCommand(options) {
   if (pending.length > 0) {
     console.log("\nPending builds:");
     for (const p of pending) {
-      console.log(`  #${p.id}  ${p.name}  ${p.status}${p.error ? `  (${p.error})` : ""}`);
+      const error = summarizeError(p.error);
+      console.log(`  #${p.id}  ${p.name}  ${p.status}${error ? `  (${error})` : ""}`);
     }
+    console.log("  (full error text: flank list --json)");
   }
 
   const scheduleEntries = Object.entries(schedules);

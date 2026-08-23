@@ -28,6 +28,24 @@ function toNumberIfNumeric(value) {
   return value;
 }
 
+// A price that isn't a number isn't automatically broken — a genuinely
+// free tier ("Free", "No cost") or a custom/contact-sales tier are both
+// real, valid states a pricing page can be in. This is the other half of
+// the instruction the diagnosis text already gives healers ("capture that
+// text in a dedicated field like price_text") — without this check, even
+// a perfect heal that follows that instruction could never pass, because
+// nothing ever recognized the result as valid. Keep the pattern narrow
+// (exact free-tier phrases only) — anything else genuinely non-numeric
+// still needs a human-readable price_text field to count as resolved,
+// rather than accepting arbitrary text as "close enough".
+const FREE_TIER_TEXT = /^(free|no cost|complimentary)$/i;
+const PRICE_TEXT_FIELD_CANDIDATES = ["price_text", "price_note", "pricing_note"];
+
+function isRecognizedNonNumericPrice(record, rawValue) {
+  if (typeof rawValue === "string" && FREE_TIER_TEXT.test(rawValue.trim())) return true;
+  return PRICE_TEXT_FIELD_CANDIDATES.some((key) => typeof record[key] === "string" && record[key].trim() !== "");
+}
+
 function unwrap(result) {
   return Array.isArray(result) ? result[0] : result;
 }
@@ -87,7 +105,9 @@ export function runRuleChecks(current, lastKnownGood, schema) {
 
         if (!isValid) {
           if (isPriceField) {
-            missingPriceTiers.push(label);
+            if (!isRecognizedNonNumericPrice(record, rawValue)) {
+              missingPriceTiers.push(label);
+            }
           } else {
             reasons.push(`The ${label} tier's "${fieldName}" field did not parse as a number (got ${JSON.stringify(rawValue)}) — its markup or position on the page may have changed.`);
           }
@@ -138,19 +158,16 @@ export function runRuleChecks(current, lastKnownGood, schema) {
     );
   }
 
-  if (lastGoodRecords && lastGoodRecords.length > 0 && records.length > 0) {
-    const currentKeys = new Set(Object.keys(records[0]));
-    const lastGoodKeys = new Set(Object.keys(lastGoodRecords[0]));
-    const missingKeys = [...lastGoodKeys].filter((k) => !currentKeys.has(k));
-    if (missingKeys.length > 0) {
-      reasons.push(`These fields were present in the last successful run but are missing now: ${missingKeys.join(", ")} — the page structure for them likely changed.`);
-    }
-  }
-
   const verdict = { status: reasons.length > 0 ? "degraded" : "healthy", reasons };
   debugLog("evaluate", `rule check verdict: ${verdict.status}`, reasons.length ? { reasonCount: reasons.length } : undefined);
   return verdict;
 }
+
+const AI_SECOND_PASS_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const lastAiSecondPassAt = new Map(); // competitor -> timestamp, in-process only
+
+const AI_DIAGNOSIS_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const lastAiDiagnosisAt = new Map(); // competitor -> timestamp, in-process only
 
 const HEAL_PROMPT_MAX_CHARS = 1000; // bdata scraper heal's own hard limit
 
@@ -179,11 +196,24 @@ export function generateTemplateDiagnosis(reasons) {
  * there's raw data to give it context — any failure (disabled, no key,
  * network, bad response) falls straight back to the deterministic
  * template. A heal must never be blocked on the AI diagnosis writer.
+ *
+ * Same cooldown reasoning as the second pass: a competitor stuck degraded
+ * (especially past the auto-heal retry cap, where this diagnosis text
+ * never even gets used) shouldn't cost a fresh Gemini call on every single
+ * scheduled tick. `competitor` is optional and only used for this cooldown
+ * key — omitting it just means every call runs uncooled.
  */
-export async function generateDiagnosis(reasons, { rawResult, aiEnabled = false, aiApiKey = null } = {}) {
+export async function generateDiagnosis(reasons, { rawResult, aiEnabled = false, aiApiKey = null, competitor = null } = {}) {
   if (reasons.length === 0) return "";
 
-  if (aiEnabled && aiApiKey && rawResult) {
+  let withinCooldown = false;
+  if (competitor) {
+    const lastCalledAt = lastAiDiagnosisAt.get(competitor);
+    withinCooldown = Boolean(lastCalledAt && Date.now() - lastCalledAt < AI_DIAGNOSIS_COOLDOWN_MS);
+  }
+
+  if (aiEnabled && aiApiKey && rawResult && !withinCooldown) {
+    if (competitor) lastAiDiagnosisAt.set(competitor, Date.now());
     debugLog("evaluate", "requesting AI-written diagnosis from Gemini");
     try {
       const diagnosis = await generateAiDiagnosis(reasons, rawResult, aiApiKey);
@@ -194,7 +224,7 @@ export async function generateDiagnosis(reasons, { rawResult, aiEnabled = false,
       // fall through to the template — never block a heal on AI availability
     }
   } else {
-    debugLog("evaluate", "AI diagnosis skipped (disabled, no key, or no raw result) — using template");
+    debugLog("evaluate", withinCooldown ? `AI diagnosis skipped for ${competitor} — cooldown active, using template` : "AI diagnosis skipped (disabled, no key, or no raw result) — using template");
   }
 
   return generateTemplateDiagnosis(reasons);
@@ -207,12 +237,28 @@ export async function generateDiagnosis(reasons, { rawResult, aiEnabled = false,
  * never downgrade a rule-flagged "degraded" back to "healthy", and any
  * failure (network, bad key, malformed response) silently falls back to
  * the rule verdict rather than blocking the pipeline.
+ *
+ * Cooldown: this pass has no correctness reason to run more than once
+ * every few minutes for the same competitor — a tight run schedule
+ * (testing, or just an aggressive cron) would otherwise call Gemini on
+ * every single tick even when nothing changed, burning free-tier quota
+ * for no benefit. `competitor` is optional and only used for this
+ * cooldown key; omitting it just means every call runs uncooled.
  */
-export async function evaluateRun(current, lastKnownGood, { schema, aiEnabled = false, aiApiKey = null } = {}) {
+export async function evaluateRun(current, lastKnownGood, { schema, aiEnabled = false, aiApiKey = null, competitor = null } = {}) {
   const ruleVerdict = runRuleChecks(current, lastKnownGood, schema);
 
   if (ruleVerdict.status === "degraded" || !aiEnabled || !aiApiKey) {
     return ruleVerdict;
+  }
+
+  if (competitor) {
+    const lastCalledAt = lastAiSecondPassAt.get(competitor);
+    if (lastCalledAt && Date.now() - lastCalledAt < AI_SECOND_PASS_COOLDOWN_MS) {
+      debugLog("evaluate", `AI second pass skipped for ${competitor} — cooldown active (last call ${Math.round((Date.now() - lastCalledAt) / 1000)}s ago)`);
+      return ruleVerdict;
+    }
+    lastAiSecondPassAt.set(competitor, Date.now());
   }
 
   debugLog("evaluate", "rules say healthy — running AI second pass (Gemini) for a subtler check");

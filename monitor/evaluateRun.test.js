@@ -162,13 +162,59 @@ test("empty feature list is flagged", () => {
   assert.ok(reasons.some((r) => r.includes("features")));
 });
 
-test("missing field vs last-known-good (schema drift) is flagged", () => {
+test("an incidental field absent from the schema (billing_period) disappearing is NOT flagged", () => {
+  // PRICING_SCHEMA's own docstring says billing_period is intentionally not
+  // required ("some pages omit it on free tiers") — its disappearance
+  // relative to a prior run shouldn't be treated as a break just because it
+  // happened to be present before. Every field the schema actually cares
+  // about is already covered per-record by the field-validity checks above.
   const drifted = [
     {
-      pricing_tiers: [{ plan_name: "Free", price: { value: 0 }, features: ["a"] }], // billing_period key dropped entirely
+      // Same 4 tiers as goodRun, minus billing_period on every one — isolates
+      // the field-drift check from the (separate, correct) tier-count check.
+      pricing_tiers: goodRun[0].pricing_tiers.map(({ billing_period, ...rest }) => rest),
     },
   ];
   const { status, reasons } = runRuleChecks(drifted, goodRun, PRICING_SCHEMA);
+  assert.equal(status, "healthy");
+  assert.deepEqual(reasons, []);
+});
+
+test("a recognized free-tier text price (\"Free\") is accepted, not flagged as missing", () => {
+  const withFreeText = [
+    {
+      pricing_tiers: [
+        { plan_name: "Starter", price_value: "Free", features: ["a"] },
+        { plan_name: "Pro", price_value: "19", features: ["a"] },
+      ],
+    },
+  ];
+  const { status, reasons } = runRuleChecks(withFreeText, null, PRICING_SCHEMA);
+  assert.equal(status, "healthy");
+  assert.deepEqual(reasons, []);
+});
+
+test("a custom/contact-sales tier with a price_text field is accepted, not flagged as missing", () => {
+  const withPriceText = [
+    {
+      pricing_tiers: [
+        { plan_name: "Free", price: { value: 0 }, features: ["a"] },
+        { plan_name: "Enterprise", price_text: "Contact us", features: ["a"] },
+      ],
+    },
+  ];
+  const { status, reasons } = runRuleChecks(withPriceText, null, PRICING_SCHEMA);
+  assert.equal(status, "healthy");
+  assert.deepEqual(reasons, []);
+});
+
+test("non-numeric price text that ISN'T a recognized free/custom signal still fails", () => {
+  const broken = [
+    {
+      pricing_tiers: [{ plan_name: "Mystery", price_value: "ask sales team about it", features: ["a"] }],
+    },
+  ];
+  const { status, reasons } = runRuleChecks(broken, null, PRICING_SCHEMA);
   assert.equal(status, "degraded");
-  assert.ok(reasons.some((r) => r.includes("billing_period") || r.includes("missing")));
+  assert.ok(reasons.some((r) => r.includes("no numeric price")));
 });

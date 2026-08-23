@@ -1,8 +1,9 @@
 import { triggerHeal } from "../../api/services/healService.js";
 import { resolveDiagnosis } from "../lib/diagnosisHelper.js";
+import { isAiEnabled } from "../../lib/aiState.js";
 
 export async function healCommand(name, options) {
-  const aiEnabled = process.env.AI_ENABLED === "true";
+  const aiEnabled = isAiEnabled();
   const aiApiKey = process.env.GEMINI_API_KEY || null;
 
   const diagnosis = await resolveDiagnosis(name, options.diagnosis, { aiEnabled, aiApiKey });

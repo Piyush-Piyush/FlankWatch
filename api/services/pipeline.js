@@ -39,9 +39,10 @@ export async function runCollectorForCompetitor(competitor, { aiEnabled = false,
     schema: PRICING_SCHEMA,
     aiEnabled,
     aiApiKey,
+    competitor,
   });
 
-  const diagnosis = await generateDiagnosis(reasons, { rawResult: result, aiEnabled, aiApiKey });
+  const diagnosis = await generateDiagnosis(reasons, { rawResult: result, aiEnabled, aiApiKey, competitor });
 
   db.prepare(
     `INSERT INTO runs (competitor, collector_id, run_timestamp, status, reasons, raw_json, field_count)

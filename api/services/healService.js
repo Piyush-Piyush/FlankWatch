@@ -4,7 +4,7 @@ import { healCollector } from "../../heal-orchestrator/healCollector.js";
 import { approveCollector } from "../../heal-orchestrator/approveCollector.js";
 import { runCollectorForCompetitor } from "./pipeline.js";
 import { generateDiagnosis } from "../../monitor/evaluateRun.js";
-import { countHealAttemptsSinceLastHealthy } from "../db/queries.js";
+import { countHealAttemptsSinceLastHealthy, getOpenHeal } from "../db/queries.js";
 import { log, debugLog, logError } from "../../lib/logger.js";
 
 const MAX_AUTO_HEAL_RETRIES = 3;
@@ -125,11 +125,23 @@ export async function approveHeal(competitor, { reject = false } = {}) {
  * job. Past the cap this stops burning attempts and leaves a
  * needs_review row for a human, same as any other stuck heal.
  */
-export async function autoHealAndApprove(competitor, reasons, rawResult, { aiEnabled = false, aiApiKey = null } = {}) {
+export async function autoHealAndApprove(competitor, reasons, rawResult, { aiEnabled = false, aiApiKey = null, diagnosis: precomputedDiagnosis = null } = {}) {
   const attempts = countHealAttemptsSinceLastHealthy(competitor);
   if (attempts >= MAX_AUTO_HEAL_RETRIES) {
-    const config = getCollectorConfig(competitor);
     const error = `Auto-heal gave up after ${MAX_AUTO_HEAL_RETRIES} attempts since the last healthy run — click Heal to retry manually.`;
+
+    // Only mark this once per incident — a scheduled run on a short interval
+    // (or the CI monitor) can call this over and over while a competitor
+    // stays degraded, and inserting a fresh row every time would both spam
+    // the heal log with duplicates AND inflate the attempt count against
+    // itself (each marker row counts toward countHealAttemptsSinceLastHealthy),
+    // a runaway feedback loop that never actually retries anything real.
+    const existing = getOpenHeal(competitor);
+    if (existing) {
+      return { status: existing.status, error: existing.error ?? error };
+    }
+
+    const config = getCollectorConfig(competitor);
     db.prepare(
       `INSERT INTO heals (collector_id, competitor, triggered_at, diagnosis, preview_result, approved_at, status, error)
        VALUES (?, ?, ?, ?, NULL, NULL, 'needs_review', ?)`
@@ -139,7 +151,10 @@ export async function autoHealAndApprove(competitor, reasons, rawResult, { aiEna
   }
 
   log("auto-heal", `[${competitor}] degraded (attempt ${attempts + 1}/${MAX_AUTO_HEAL_RETRIES}), auto-triggering heal`, { reasons });
-  const diagnosis = await generateDiagnosis(reasons, { rawResult, aiEnabled, aiApiKey });
+  // Callers that already ran the pipeline (scheduler, /run route, CLI run
+  // command) already have a diagnosis from that same evaluation — reuse it
+  // instead of asking Gemini to write the same diagnosis twice.
+  const diagnosis = precomputedDiagnosis || (await generateDiagnosis(reasons, { rawResult, aiEnabled, aiApiKey, competitor }));
   const healResult = await triggerHeal(competitor, diagnosis);
 
   if (healResult.status !== "awaiting_approval") {

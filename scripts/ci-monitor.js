@@ -2,6 +2,7 @@ import "dotenv/config";
 import { loadCollectors } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "../api/services/pipeline.js";
 import { autoHealAndApprove } from "../api/services/healService.js";
+import { isAiEnabled } from "../lib/aiState.js";
 
 /**
  * Unattended monitor for CI: run each collector, and if it comes back
@@ -17,7 +18,7 @@ import { autoHealAndApprove } from "../api/services/healService.js";
  */
 const collectors = loadCollectors();
 
-const aiEnabled = process.env.AI_ENABLED === "true";
+const aiEnabled = isAiEnabled();
 const aiApiKey = process.env.GEMINI_API_KEY || null;
 
 let hadUnrecoveredFailure = false;
@@ -32,7 +33,7 @@ for (const competitor of Object.keys(collectors)) {
 
   console.log(`degraded: ${result.reasons.join("; ")}`);
   console.log("auto-healing...");
-  const approveResult = await autoHealAndApprove(competitor, result.reasons, result.result, { aiEnabled, aiApiKey });
+  const approveResult = await autoHealAndApprove(competitor, result.reasons, result.result, { aiEnabled, aiApiKey, diagnosis: result.diagnosis });
   console.log(`final status: ${approveResult.status}`);
 
   if (approveResult.status === "needs_review") {

@@ -1,5 +1,6 @@
 import { askText, askYesNo } from "../lib/prompt.js";
 import { upsertEnvVar } from "../lib/envFile.js";
+import { setAiEnabled } from "../../lib/aiState.js";
 
 /** Overwrites GEMINI_API_KEY in .env — safe to run repeatedly, each call replaces the previous value. */
 export async function setGeminiKeyCommand(key) {
@@ -14,8 +15,6 @@ export async function setGeminiKeyCommand(key) {
   console.log("Saved GEMINI_API_KEY to .env.");
 
   const enable = await askYesNo("Enable AI features now?", true);
-  if (enable) {
-    upsertEnvVar("AI_ENABLED", "true");
-    console.log("Set AI_ENABLED=true.");
-  }
+  setAiEnabled(enable);
+  console.log(`AI is ${enable ? "on" : "off"}.`);
 }

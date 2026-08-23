@@ -1,6 +1,7 @@
 import spawn from "cross-spawn";
 import { askText, askYesNo } from "../lib/prompt.js";
 import { upsertEnvVar } from "../lib/envFile.js";
+import { setAiEnabled } from "../../lib/aiState.js";
 
 function runBdataLogin() {
   return new Promise((resolve, reject) => {
@@ -21,13 +22,13 @@ export async function setupCommand() {
 
   const key = await askText("Gemini API key (leave blank to skip): ");
   if (!key) {
-    console.log("\nSkipped — FlankWatch will run pure rule-based (AI_ENABLED stays off).");
+    console.log("\nSkipped — FlankWatch will run pure rule-based (no key on file, so AI never fires regardless of the on/off toggle).");
     return;
   }
 
   upsertEnvVar("GEMINI_API_KEY", key);
   const enable = await askYesNo("Enable AI features now?", true);
-  if (enable) upsertEnvVar("AI_ENABLED", "true");
+  setAiEnabled(enable);
 
-  console.log(`\nSaved GEMINI_API_KEY to .env${enable ? " and set AI_ENABLED=true" : " (AI_ENABLED left as-is — set it to true in .env when ready)"}.`);
+  console.log(`\nSaved GEMINI_API_KEY to .env, AI is ${enable ? "on" : "off"}. Toggle anytime with \`flank ai on\` / \`flank ai off\`.`);
 }

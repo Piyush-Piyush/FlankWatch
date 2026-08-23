@@ -35,8 +35,11 @@ jobs:
       - name: Authenticate Bright Data CLI
         run: npx -p @brightdata/cli bdata login -k "${{ secrets.BRIGHT_DATA_API_KEY }}"
 
+      # AI is on by default (collectors/ai-state.json is gitignored, so a
+      # fresh checkout has none and isAiEnabled() defaults to true) — it's
+      # a no-op if GEMINI_API_KEY isn't set, same graceful fallback as
+      # everywhere else in the app.
       - name: Run monitor (auto-heals + auto-approves on its own if degraded)
         run: node scripts/ci-monitor.js
         env:
-          AI_ENABLED: ${{ vars.AI_ENABLED }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

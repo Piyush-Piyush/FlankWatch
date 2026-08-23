@@ -12,6 +12,7 @@ import { reloadSchedules } from "./scheduler.js";
 import { diffPricingRuns } from "../lib/diffPricing.js";
 import { generateDigest } from "../lib/digest.js";
 import { generateDiagnosis } from "../monitor/evaluateRun.js";
+import { isAiEnabled } from "../lib/aiState.js";
 import { log, debugLog, logError, isDebug } from "../lib/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,7 +34,12 @@ app.use((req, res, next) => {
 
 app.use(express.static(DASHBOARD_DIR));
 
-const aiEnabled = process.env.AI_ENABLED === "true";
+// GEMINI_API_KEY is a secret, appropriately read once at boot from .env.
+// Whether AI is ON is a live-toggleable runtime setting, not a secret, so
+// it's read fresh via isAiEnabled() in every handler below instead of
+// being cached here — an env var read once at startup would silently go
+// stale the moment someone edits .env or runs `flank ai on/off` while the
+// server's already running.
 const aiApiKey = process.env.GEMINI_API_KEY || null;
 
 function buildCompetitor(name, config) {
@@ -76,7 +82,7 @@ app.get("/api/competitors", (req, res) => {
     requestedAt: p.requested_at,
   }));
 
-  res.json({ competitors, pending, schedules, aiEnabled });
+  res.json({ competitors, pending, schedules, aiEnabled: isAiEnabled() });
 });
 
 app.get("/api/digest", async (req, res) => {
@@ -93,7 +99,7 @@ app.get("/api/digest", async (req, res) => {
       competitorDiffs.push({ competitor: name, diff });
     }
 
-    const digest = await generateDigest(competitorDiffs, { aiEnabled, aiApiKey });
+    const digest = await generateDigest(competitorDiffs, { aiEnabled: isAiEnabled(), aiApiKey });
     res.json({ digest });
   } catch (err) {
     logError("http", "GET /api/digest failed", err);
@@ -111,12 +117,13 @@ app.get("/api/heals", (req, res) => {
 
 app.post("/api/competitors/:name/run", async (req, res) => {
   try {
+    const aiEnabled = isAiEnabled();
     const result = await runCollectorForCompetitor(req.params.name, { aiEnabled, aiApiKey, url: req.body?.url });
     res.json(result);
     if (result.status !== "healthy") {
       // Respond first — heal+approve is multi-minute; the dashboard picks
       // up progress via its usual polling, same as a scheduled run.
-      autoHealAndApprove(req.params.name, result.reasons, result.result, { aiEnabled, aiApiKey }).catch((err) =>
+      autoHealAndApprove(req.params.name, result.reasons, result.result, { aiEnabled, aiApiKey, diagnosis: result.diagnosis }).catch((err) =>
         logError("http", `auto-heal failed for ${req.params.name}`, err)
       );
     }
@@ -135,7 +142,11 @@ app.post("/api/competitors/:name/heal", async (req, res) => {
     const latestRun = getLatestRun(competitor);
     const reasons = latestRun ? JSON.parse(latestRun.reasons || "[]") : [];
     const rawResult = latestRun ? JSON.parse(latestRun.raw_json) : null;
-    const diagnosis = req.body?.diagnosis || (await generateDiagnosis(reasons, { rawResult, aiEnabled, aiApiKey })) || null;
+    // No cooldown key here on purpose — this is a human explicitly clicking
+    // Heal (or the CLI's `flank heal`), not an automated/scheduled call. The
+    // cooldown exists to stop unattended loops from hammering Gemini, not to
+    // throttle a deliberate one-off action.
+    const diagnosis = req.body?.diagnosis || (await generateDiagnosis(reasons, { rawResult, aiEnabled: isAiEnabled(), aiApiKey })) || null;
     if (!diagnosis) {
       res.status(400).json({ error: "diagnosis is required (no degraded reasons on file to auto-generate one)" });
       return;
@@ -219,7 +230,7 @@ app.delete("/api/competitors/:name", (req, res) => {
 app.put("/api/schedules/:category", (req, res) => {
   try {
     const schedules = setSchedule(req.params.category, req.body?.cron || null);
-    reloadSchedules({ aiEnabled, aiApiKey });
+    reloadSchedules({ aiApiKey });
     res.json({ schedules });
   } catch (err) {
     logError("http", `PUT /api/schedules/${req.params.category} failed`, err);
@@ -230,6 +241,6 @@ app.put("/api/schedules/:category", (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   log("server", `FlankWatch dashboard running at http://localhost:${PORT}`);
-  log("server", `debug logging: ${isDebug ? "ON" : "off (run 'npm run debug' to enable)"}, AI: ${aiEnabled ? "on (Gemini)" : "off"}`);
-  reloadSchedules({ aiEnabled, aiApiKey });
+  log("server", `debug logging: ${isDebug ? "ON" : "off (run 'npm run debug' to enable)"}, AI: ${isAiEnabled() ? "on (Gemini)" : "off"} (toggle with 'flank ai on/off')`);
+  reloadSchedules({ aiApiKey });
 });

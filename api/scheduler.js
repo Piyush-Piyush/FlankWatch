@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { loadSchedules, loadCollectorsByCategory } from "../lib/collectorStore.js";
 import { runCollectorForCompetitor } from "./services/pipeline.js";
 import { autoHealAndApprove } from "./services/healService.js";
+import { isAiEnabled } from "../lib/aiState.js";
 import { log, debugLog, logError } from "../lib/logger.js";
 
 const active = new Map(); // category -> scheduled cron task
@@ -12,7 +13,7 @@ const active = new Map(); // category -> scheduled cron task
  * runs on that cadence. Reads schedules.json and reconciles the live cron
  * tasks against it — call reloadSchedules() after any schedule change.
  */
-export function reloadSchedules({ aiEnabled = false, aiApiKey = null } = {}) {
+export function reloadSchedules({ aiApiKey = null } = {}) {
   const schedules = loadSchedules();
   debugLog("scheduler", "reloading schedules", schedules);
 
@@ -37,6 +38,11 @@ export function reloadSchedules({ aiEnabled = false, aiApiKey = null } = {}) {
     }
 
     const task = cron.schedule(expression, async () => {
+      // Read fresh on every tick, not captured from reloadSchedules()'s
+      // closure — a long-running scheduler must see a `flank ai on/off`
+      // toggle on its very next firing, not just after the next schedule
+      // edit happens to re-run reloadSchedules().
+      const aiEnabled = isAiEnabled();
       const groups = loadCollectorsByCategory();
       const collectors = groups[category] || [];
       log("scheduler", `firing for category "${category}"`, { competitorCount: collectors.length });
@@ -46,7 +52,7 @@ export function reloadSchedules({ aiEnabled = false, aiApiKey = null } = {}) {
           if (result.status !== "healthy") {
             // Fire-and-forget: heal+approve is multi-minute, don't block the
             // rest of this category's run on it.
-            autoHealAndApprove(c.name, result.reasons, result.result, { aiEnabled, aiApiKey }).catch((err) =>
+            autoHealAndApprove(c.name, result.reasons, result.result, { aiEnabled, aiApiKey, diagnosis: result.diagnosis }).catch((err) =>
               logError("scheduler", `auto-heal failed for ${c.name}`, err)
             );
           }

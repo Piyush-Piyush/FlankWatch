@@ -11,8 +11,6 @@ each with its own schedule. New competitors are added **on demand** — from the
 dashboard — with a name, a pricing URL, and a group; Bright Data's AI builds the scraper in the
 background. Nothing is hardcoded to a specific site.
 
-Built for a hackathon judged on Best Use of Bright Data, Best UI, and Best Clean Code.
-
 ---
 
 ## Quick start
@@ -277,7 +275,9 @@ A few things worth knowing if picking this back up:
   — the correct de-coupling from any one site's exact key names or types. Descript was later
   deleted while testing the delete feature (see the delete confirm-dialog copy above for exactly
   what that does) — it's reproducible any time via the same on-demand flow. Earlier attempts at
-  Linear, Retool, and Resend failed during AI generation; see `TARGETS.md`.
+  Linear and Resend failed during AI generation itself; Retool built successfully but returned
+  empty `pricing_tiers` on every real run (the AI-Flow preview apparently saw data a fresh run
+  didn't).
 - **AI-written diagnoses can catch gaps the rules don't know about.** Live-tested on Descript: an
   earlier heal had already added a `price_text` field capturing "Custom" for its Enterprise tier
   — genuinely fixed — but the rule schema didn't originally know `price_text` counts as a valid
@@ -292,8 +292,8 @@ A few things worth knowing if picking this back up:
   per-scraper lock. `autoHealAndApprove()`'s retry cap treats this the same as any other failed
   heal (counts toward the 3-attempt budget, lands in `needs_review`), which is the right behavior
   regardless of cause. Also observed: `bdata scraper create` failing AI generation outright for
-  `cal.com/pricing` (`status: undefined`, no explanation) — added to the same failure bucket as
-  Linear/Retool/Resend in `TARGETS.md`, not every public pricing page is generatable.
+  `cal.com/pricing` (`status: undefined`, no explanation) — same failure bucket as Linear/Resend
+  above, not every public pricing page is generatable.
 - **`bdata scraper run <id> <url>` appears to ignore the URL argument.** Tested against three
   increasingly-mutated staged pages and even `https://example.com` — identical output every
   time, matching whatever the collector returned when first created. Bright Data's own docs

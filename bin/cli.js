@@ -5,6 +5,7 @@ import pkg from "../package.json" with { type: "json" };
 
 import { setupCommand } from "./commands/setup.js";
 import { setGeminiKeyCommand } from "./commands/setGeminiKey.js";
+import { aiCommand } from "./commands/ai.js";
 import { listCommand } from "./commands/list.js";
 import { addCommand } from "./commands/add.js";
 import { deleteCommand } from "./commands/delete.js";
@@ -32,6 +33,11 @@ program
   .action(setGeminiKeyCommand);
 
 program
+  .command("ai [state]")
+  .description('Show or set the AI on/off toggle, e.g. "flank ai on" / "flank ai off" — on by default')
+  .action(aiCommand);
+
+program
   .command("list")
   .description("Show tracked competitors, pending builds, and schedules")
   .option("--json", "output raw JSON instead of a table")
@@ -55,6 +61,7 @@ program
   .description("Trigger a run now; auto-heals if it comes back degraded")
   .option("-u, --url <url>", "override the collector's configured URL")
   .option("--no-heal", "skip auto-heal even if the run comes back degraded")
+  .option("-s, --schedule <cron>", "also set this competitor's group schedule, e.g. \"0 9 * * *\"")
   .action(runCommand);
 
 program

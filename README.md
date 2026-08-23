@@ -97,10 +97,11 @@ drive the whole `create → run → heal → approve` loop without opening a bro
 ```bash
 flank setup                                        # bdata login + optional Gemini key
 flank set-gemini-key [key]                          # reset the Gemini key alone, overwrites in place
+flank ai [on|off]                                   # show or set the AI toggle — on by default
 flank list [--json]                                 # competitors, pending builds, schedules
 flank add <name> <url> [-c category] [-d desc]       # build a new scraper on demand
 flank delete <name> [-y]                             # stop tracking + wipe history
-flank run <name> [-u url] [--no-heal]                # trigger a run; auto-heals if degraded
+flank run <name> [-u url] [--no-heal] [-s cron]      # trigger a run (+ auto-heal, + optionally set the schedule)
 flank heal <name> [--diagnosis "..."]                # manual heal (auto-diagnoses if omitted)
 flank approve <name> [--reject]                      # approve/reject the pending heal
 flank dismiss-heal <name>                            # clear a stuck needs_review heal
@@ -118,8 +119,21 @@ argument, which lands in shell history.
 ## The AI toggle
 
 Uses Google Gemini (`gemini-3.5-flash-lite` — free-tier friendly, fast, cheap; get a key at
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey)), gated everywhere behind one
-`AI_ENABLED` + `GEMINI_API_KEY` pair, three touchpoints:
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey)). **On by default** — a key with
+no explicit toggle just works. Turn it off/back on anytime with:
+```bash
+flank ai off
+flank ai on
+flank ai        # no argument — just reports current state
+```
+This is runtime state (`collectors/ai-state.json`, via `lib/aiState.js`), not an env var —
+deliberately, since an env var is only read once at process startup, so editing `.env` while a
+dashboard is already running would silently do nothing until restart. The toggle is read fresh on
+every request/scheduled tick instead, so flipping it takes effect immediately: a running
+dashboard's next poll (≤4s) and a running scheduler's next cron firing both pick it up without a
+restart, and the dashboard's "AI review: on/off" header updates automatically. Every touchpoint
+below still requires `GEMINI_API_KEY` to actually be set — the toggle alone with no key on file
+just stays a no-op, same as always. Three touchpoints:
 
 - **Anomaly second pass** (`monitor/aiSecondPass.js`) — `evaluate_run()` is rule-based and
   deterministic by default, never depending on an external API being up. When enabled, this can
@@ -183,7 +197,8 @@ just that the job ran.
 Requires two repo secrets:
 - `BRIGHT_DATA_API_KEY` — from the Bright Data dashboard (Settings → API key), used with
   `bdata login -k` since the normal browser OAuth flow doesn't work in CI.
-- `GEMINI_API_KEY` — optional, only needed if the `AI_ENABLED` repo variable is set to `true`.
+- `GEMINI_API_KEY` — optional; AI is on by default (see "The AI toggle" above), so setting this
+  secret is all that's needed for CI to use it. Leave it unset and CI falls back to pure rule-based.
 
 ## Honest status notes
 

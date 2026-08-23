@@ -20,13 +20,14 @@ export function listCommand(options) {
   if (competitors.length === 0) {
     console.log("No competitors tracked yet. Add one with: flankwatch add <name> <url>");
   } else {
-    const widths = [16, 16, 12, 8, 8, 16, 24];
-    console.log(row(["NAME", "CATEGORY", "STATUS", "UPTIME", "STREAK", "OPEN HEAL", "LAST RUN"], widths));
+    const widths = [16, 20, 16, 12, 8, 8, 16, 24];
+    console.log(row(["NAME", "COLLECTOR ID", "CATEGORY", "STATUS", "UPTIME", "STREAK", "OPEN HEAL", "LAST RUN"], widths));
     for (const c of competitors) {
       console.log(
         row(
           [
             c.name,
+            c.collectorId,
             c.category,
             c.latestRun?.status ?? "no runs yet",
             c.resilience.uptimePct != null ? `${c.resilience.uptimePct}%` : "-",

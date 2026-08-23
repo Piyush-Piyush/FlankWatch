@@ -11,3 +11,7 @@ scratch/
 collectors/schedules.json
 dashboard/staged/
 flankwatch-build-roadmap.md
+
+# Demo-only static page for the live self-heal walkthrough — its own git
+# repo (deployed separately to GitHub Pages), not part of this project.
+demo-site/

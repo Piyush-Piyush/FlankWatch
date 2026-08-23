@@ -192,8 +192,13 @@ app.post("/api/collectors", (req, res) => {
 });
 
 app.delete("/api/collectors/pending/:id", (req, res) => {
-  dismissPending(Number(req.params.id));
-  res.json({ ok: true });
+  try {
+    dismissPending(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    logError("http", `DELETE /api/collectors/pending/${req.params.id} failed`, err);
+    res.status(400).json({ error: String(err.message ?? err) });
+  }
 });
 
 // Stops tracking a competitor and wipes its history. Bright Data has no

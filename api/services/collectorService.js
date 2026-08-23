@@ -92,8 +92,21 @@ export async function runCreateJob(pendingId) {
   }
 }
 
+/**
+ * Clears a pending build row regardless of status. A "creating" row here
+ * doesn't necessarily mean it's still actually running — if the process
+ * that called runCreateJob() was killed or crashed mid-call, the row is
+ * stuck at "creating" forever with no failure ever recorded, and that's
+ * a real dead end for the user otherwise. Dismissing it only stops
+ * FlankWatch from tracking it; if the AI-Flow job really is still running
+ * on Bright Data's side, that's unaffected (same caveat as delete).
+ */
 export function dismissPending(pendingId) {
-  db.prepare("DELETE FROM pending_collectors WHERE id = ? AND status = 'failed'").run(pendingId);
+  const row = db.prepare("SELECT * FROM pending_collectors WHERE id = ?").get(pendingId);
+  if (!row) throw new Error(`No pending build #${pendingId}`);
+  db.prepare("DELETE FROM pending_collectors WHERE id = ?").run(pendingId);
+  log("create", `[${row.name}] dismissed pending build #${pendingId} (was "${row.status}")`);
+  return row;
 }
 
 /**

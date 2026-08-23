@@ -6,5 +6,13 @@
     "category": "API tools",
     "status": "verified",
     "created_at": "2026-08-23T00:45:45.295Z"
+  },
+  "flowbit": {
+    "url": "https://piyush-piyush.github.io/demo-site/",
+    "collector_id": "c_mt5lkn4d1997gf4beo",
+    "description": "Extract ALL pricing tiers shown on the page (every plan card, not just one). For each tier: plan name, price value, currency, billing period (monthly/annual), full list of feature bullets.",
+    "category": "Demo",
+    "status": "verified",
+    "created_at": "2026-08-23T09:23:55.002Z"
   }
 }

@@ -84,10 +84,21 @@ export async function runApproveJob(healId, competitor, { reject = false } = {})
       return;
     }
 
-    db.prepare("UPDATE heals SET status = ?, approved_at = ? WHERE id = ?").run(response.status, new Date().toISOString(), healId);
     log("approve", `[${competitor}] heal #${healId} approved -> ${response.status}; verifying recovery with a fresh run`);
-    // Verify recovery: re-run the collector and let evaluate_run confirm it's healthy again.
-    await runCollectorForCompetitor(competitor);
+    // Verify recovery: re-run the collector and let evaluate_run confirm it's actually
+    // healthy again. Approve succeeding only means Bright Data saved the schema change —
+    // it doesn't mean the fix was correct, so the heal's final status has to reflect what
+    // this run actually found, not just that the approve call didn't error.
+    const verifyResult = await runCollectorForCompetitor(competitor);
+    if (verifyResult.status !== "healthy") {
+      const error = `Approved, but verification run still came back "${verifyResult.status}": ${verifyResult.reasons.join("; ")}`;
+      db.prepare("UPDATE heals SET status = 'needs_review', approved_at = ?, error = ? WHERE id = ?").run(new Date().toISOString(), error, healId);
+      logError("approve", `[${competitor}] heal #${healId} approved but did not recover`, new Error(error));
+      return;
+    }
+
+    db.prepare("UPDATE heals SET status = ?, approved_at = ? WHERE id = ?").run(response.status, new Date().toISOString(), healId);
+    log("approve", `[${competitor}] heal #${healId} verified healthy`);
   } catch (err) {
     db.prepare("UPDATE heals SET status = 'needs_review', error = ? WHERE id = ?").run(String(err.message ?? err), healId);
     logError("approve", `[${competitor}] heal #${healId} approve failed, marked needs_review`, err);
